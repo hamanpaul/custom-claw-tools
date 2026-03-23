@@ -1,4 +1,4 @@
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -9,12 +9,19 @@ import type {
   IntakeResult,
   RiskDecision,
 } from './models.js';
+import { approvalJobSchema, intakeResultSchema } from './models.js';
 
 export type IntakeArtifacts = {
   requestPath: string;
   decisionPath: string;
   resultPath: string;
   approvalPath?: string;
+  auditPath: string;
+};
+
+export type DecisionArtifacts = {
+  approvalPath: string;
+  resultPath: string;
   auditPath: string;
 };
 
@@ -74,6 +81,70 @@ export async function persistRequestIntake(
   };
 }
 
+export async function loadApprovalJob(layout: Layout, jobId: string): Promise<ApprovalJob> {
+  const approvalPath = buildApprovalPath(layout, jobId);
+
+  return approvalJobSchema.parse(JSON.parse(await readFile(approvalPath, 'utf8')));
+}
+
+export async function loadResultArtifact(layout: Layout, requestId: string): Promise<IntakeResult> {
+  const resultPath = buildResultPath(layout, requestId);
+
+  return intakeResultSchema.parse(JSON.parse(await readFile(resultPath, 'utf8')));
+}
+
+export async function persistApprovalDecision(
+  layout: Layout,
+  input: {
+    approvalJob: ApprovalJob;
+    result: IntakeResult;
+    event: string;
+    meta?: Record<string, unknown>;
+  },
+): Promise<DecisionArtifacts> {
+  const approvalPath = buildApprovalPath(layout, input.approvalJob.jobId);
+  const resultPath = buildResultPath(layout, input.result.requestId);
+
+  await Promise.all([
+    writeJsonAtomic(approvalPath, input.approvalJob),
+    writeJsonAtomic(resultPath, input.result),
+  ]);
+
+  const auditPath = await appendAuditEvent(layout, input.result.requestId, input.event, {
+    approvalJobId: input.approvalJob.jobId,
+    status: input.approvalJob.status,
+    resultStatus: input.result.status,
+    ...(input.meta ?? {}),
+  });
+
+  return {
+    approvalPath,
+    resultPath,
+    auditPath,
+  };
+}
+
+export async function appendAuditEvent(
+  layout: Layout,
+  requestId: string,
+  event: string,
+  meta?: Record<string, unknown>,
+): Promise<string> {
+  const auditPath = join(
+    layout.logsDir,
+    `${new Date().toISOString().replaceAll(':', '-')}-${toSafeSegment(requestId)}-${toSafeSegment(event)}.json`,
+  );
+
+  await writeJsonAtomic(auditPath, {
+    ts: new Date().toISOString(),
+    event,
+    requestId,
+    ...(meta ? { meta } : {}),
+  });
+
+  return auditPath;
+}
+
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
 
@@ -82,6 +153,14 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
 
   await writeFile(tempPath, payload, 'utf8');
   await rename(tempPath, path);
+}
+
+function buildApprovalPath(layout: Layout, jobId: string): string {
+  return join(layout.approvalsDir, `${toSafeSegment(jobId)}.json`);
+}
+
+function buildResultPath(layout: Layout, requestId: string): string {
+  return join(layout.resultsDir, `${toSafeSegment(requestId)}.json`);
 }
 
 function toSafeSegment(value: string): string {

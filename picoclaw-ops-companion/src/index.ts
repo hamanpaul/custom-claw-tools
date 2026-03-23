@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
+import { handleRelayDecision } from './approvals.js';
 import { persistRequestIntake } from './artifacts.js';
 import { parseCliArgs } from './cli.js';
 import { loadConfig } from './config.js';
@@ -28,44 +29,56 @@ async function main(): Promise<void> {
     return;
   }
 
-  const request = companionRequestSchema.parse(
-    JSON.parse(await readRequestSource(command.requestPath)),
-  );
-  const decision = classifyRisk(request);
-  const approvalJob = decision.requiresApproval
-    ? buildApprovalJob(request, decision, config)
-    : undefined;
-  const result = buildIntakeResult(request, decision, approvalJob);
-  const artifacts = await persistRequestIntake(layout, {
-    request,
-    decision,
-    approvalJob,
-    result,
+  if (command.name === 'intake') {
+    const request = companionRequestSchema.parse(
+      JSON.parse(await readRequestSource(command.requestPath)),
+    );
+    const decision = classifyRisk(request);
+    const approvalJob = decision.requiresApproval
+      ? buildApprovalJob(request, decision, config)
+      : undefined;
+    const result = buildIntakeResult(request, decision, approvalJob);
+    const artifacts = await persistRequestIntake(layout, {
+      request,
+      decision,
+      approvalJob,
+      result,
+    });
+
+    logger.log('info', 'request intake complete', {
+      requestId: request.requestId,
+      type: request.type,
+      risk: decision.risk,
+      requiresApproval: decision.requiresApproval,
+      approvalJobId: approvalJob?.jobId,
+    });
+
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          requestId: request.requestId,
+          type: request.type,
+          risk: decision.risk,
+          requiresApproval: decision.requiresApproval,
+          approvalJobId: approvalJob?.jobId ?? null,
+          resultStatus: result.status,
+          artifacts,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return;
+  }
+
+  const outcome = await handleRelayDecision(layout, config, {
+    sender: command.sender,
+    text: command.text,
   });
 
-  logger.log('info', 'request intake complete', {
-    requestId: request.requestId,
-    type: request.type,
-    risk: decision.risk,
-    requiresApproval: decision.requiresApproval,
-    approvalJobId: approvalJob?.jobId,
-  });
+  logger.log('info', 'relay decision processed', outcome);
 
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        requestId: request.requestId,
-        type: request.type,
-        risk: decision.risk,
-        requiresApproval: decision.requiresApproval,
-        approvalJobId: approvalJob?.jobId ?? null,
-        resultStatus: result.status,
-        artifacts,
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
 }
 
 async function readRequestSource(requestPath: string): Promise<string> {

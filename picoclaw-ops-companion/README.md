@@ -113,7 +113,15 @@ cat request.json | npm run dev -- intake --request -
 
 - companion 先建立 approval job JSON
 - PicoClaw 可直接取用其中的 `/approve <job-id> <totp>` 與 `/reject <job-id>`
-- 真正執行 layer 會在下一個 Milestone 串接
+- 可透過 relay command 進一步處理：
+
+```bash
+npm run dev -- decision --sender telegram:<PRIMARY_USER_ID> --text "/approve <job-id> 123456"
+npm run dev -- decision --sender telegram:<PRIMARY_USER_ID> --text "/reject <job-id>"
+```
+
+- `approve` 需要配置 `PICOCLAW_TOTP_SECRET`
+- 真正執行 layer 仍在下一個 Milestone 串接
 
 ## 部署與前置需求
 

@@ -124,7 +124,7 @@ export const approvalJobSchema = z.object({
 
 export const intakeResultSchema = z.object({
   requestId: z.string().min(1),
-  status: z.enum(['ready_for_execution', 'awaiting_approval']),
+  status: z.enum(['ready_for_execution', 'awaiting_approval', 'rejected', 'expired']),
   risk: riskLevelSchema,
   summary: z.string().min(1),
   approvalJobId: z.string().min(1).optional(),
