@@ -23,7 +23,7 @@ export function createLogger(level: LogLevel) {
         ...(meta ? { meta } : {}),
       };
 
-      console.log(JSON.stringify(payload));
+      process.stderr.write(`${JSON.stringify(payload)}\n`);
     },
   };
 }
