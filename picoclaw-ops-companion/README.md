@@ -108,6 +108,7 @@ cat request.json | npm run dev -- intake --request -
 - risk classification
 - approval job 生成（僅 high risk）
 - request / decision / result / audit artifact 落盤
+- `execute --request-id` 可執行已處於 `ready_for_execution` 的 request
 
 ### 高風險任務
 
@@ -122,6 +123,15 @@ npm run dev -- decision --sender telegram:8313353234 --text "/reject <job-id>"
 
 - `approve` 需要配置 `PICOCLAW_TOTP_SECRET`
 - 真正執行 layer 仍在下一個 Milestone 串接
+
+### 低風險 execution（目前支援 `workspace_analysis`）
+
+```bash
+npm run dev -- execute --request-id <request-id>
+```
+
+- 目前真的有實作的 allowlisted execution wrapper 是 `workspace_analysis`
+- 其他 request type 會明確寫回 `not implemented`，不會假裝成功
 
 ## 部署與前置需求
 

@@ -7,6 +7,10 @@ export type CliCommand =
       requestPath: string;
     }
   | {
+      name: 'execute';
+      requestId: string;
+    }
+  | {
       name: 'decision';
       sender: string;
       text: string;
@@ -16,6 +20,7 @@ const usage = [
   'Usage:',
   '  picoclaw-ops-companion bootstrap',
   '  picoclaw-ops-companion intake --request <path|->',
+  '  picoclaw-ops-companion execute --request-id <request-id>',
   '  picoclaw-ops-companion decision --sender <sender> --text "</approve ...>"',
 ].join('\n');
 
@@ -41,6 +46,20 @@ export function parseCliArgs(argv: string[]): CliCommand {
     return {
       name: 'intake',
       requestPath,
+    };
+  }
+
+  if (command === 'execute') {
+    const requestIdFlagIndex = rest.indexOf('--request-id');
+    const requestId = requestIdFlagIndex === -1 ? undefined : rest[requestIdFlagIndex + 1];
+
+    if (requestId === undefined) {
+      throw new Error(`execute requires --request-id\n${usage}`);
+    }
+
+    return {
+      name: 'execute',
+      requestId,
     };
   }
 

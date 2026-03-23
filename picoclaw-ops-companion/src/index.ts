@@ -4,6 +4,7 @@ import { handleRelayDecision } from './approvals.js';
 import { persistRequestIntake } from './artifacts.js';
 import { parseCliArgs } from './cli.js';
 import { loadConfig } from './config.js';
+import { executeRequest } from './execution.js';
 import { buildLayout, ensureLayout } from './layout.js';
 import { createLogger } from './logger.js';
 import { companionRequestSchema } from './models.js';
@@ -68,6 +69,15 @@ async function main(): Promise<void> {
         2,
       )}\n`,
     );
+    return;
+  }
+
+  if (command.name === 'execute') {
+    const outcome = await executeRequest(layout, config, command.requestId);
+
+    logger.log('info', 'request execution complete', outcome);
+
+    process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
     return;
   }
 
