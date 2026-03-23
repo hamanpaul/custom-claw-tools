@@ -1,0 +1,8 @@
+[Unit]
+Description=Obsidian sync healthcheck and failover
+After=obsidian-sync.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+ExecStart=%h/.local/bin/obsidian_sync_healthcheck.sh

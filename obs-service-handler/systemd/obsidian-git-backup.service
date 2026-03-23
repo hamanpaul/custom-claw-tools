@@ -1,0 +1,11 @@
+[Unit]
+Description=Backup Obsidian vault to GitHub
+Wants=network-online.target
+After=network-online.target obsidian-sync.service
+ConditionPathExists=%h/.picoclaw/workspace/notes
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.picoclaw/workspace/notes
+Environment=BOOTSTRAP_FORCE_PUSH=yes
+ExecStart=%h/.local/bin/obsidian_git_backup.sh

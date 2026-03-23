@@ -1,0 +1,16 @@
+[Unit]
+Description=Obsidian continuous sync guard
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+ExecStart=%h/.local/bin/obsidian_sync_guard.sh
+Restart=always
+RestartPreventExitStatus=41 42
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
