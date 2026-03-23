@@ -5,12 +5,18 @@ export type CliCommand =
   | {
       name: 'intake';
       requestPath: string;
+    }
+  | {
+      name: 'decision';
+      sender: string;
+      text: string;
     };
 
 const usage = [
   'Usage:',
   '  picoclaw-ops-companion bootstrap',
   '  picoclaw-ops-companion intake --request <path|->',
+  '  picoclaw-ops-companion decision --sender <sender> --text "</approve ...>"',
 ].join('\n');
 
 export function parseCliArgs(argv: string[]): CliCommand {
@@ -35,6 +41,23 @@ export function parseCliArgs(argv: string[]): CliCommand {
     return {
       name: 'intake',
       requestPath,
+    };
+  }
+
+  if (command === 'decision') {
+    const senderFlagIndex = rest.indexOf('--sender');
+    const textFlagIndex = rest.indexOf('--text');
+    const sender = senderFlagIndex === -1 ? undefined : rest[senderFlagIndex + 1];
+    const text = textFlagIndex === -1 ? undefined : rest[textFlagIndex + 1];
+
+    if (sender === undefined || text === undefined) {
+      throw new Error(`decision requires --sender and --text\n${usage}`);
+    }
+
+    return {
+      name: 'decision',
+      sender,
+      text,
     };
   }
 
