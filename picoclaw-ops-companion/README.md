@@ -82,20 +82,38 @@ picoclaw-ops-companion/
   tsconfig.json
 ```
 
-## 使用方式（預計）
+## 使用方式（目前 MVP slice）
 
-### 一般任務
+### 初始化目錄
 
-- 由 PicoClaw 接受 request
-- companion 判定為低風險後直接執行
-- 結果回寫並由 PicoClaw 摘要
+```bash
+npm run dev -- bootstrap
+```
+
+### Intake 結構化 request
+
+```bash
+npm run dev -- intake --request ./request.json
+```
+
+也可以從 stdin 讀入：
+
+```bash
+cat request.json | npm run dev -- intake --request -
+```
+
+當前會完成：
+
+- request schema 驗證
+- risk classification
+- approval job 生成（僅 high risk）
+- request / decision / result / audit artifact 落盤
 
 ### 高風險任務
 
-- companion 先建立 approval job
-- PicoClaw 送出 approval summary
-- 使用者回覆 `/approve <job-id> <totp>`
-- 驗證通過後才執行
+- companion 先建立 approval job JSON
+- PicoClaw 可直接取用其中的 `/approve <job-id> <totp>` 與 `/reject <job-id>`
+- 真正執行 layer 會在下一個 Milestone 串接
 
 ## 部署與前置需求
 
