@@ -124,10 +124,19 @@ export const approvalJobSchema = z.object({
 
 export const intakeResultSchema = z.object({
   requestId: z.string().min(1),
-  status: z.enum(['ready_for_execution', 'awaiting_approval', 'rejected', 'expired']),
+  status: z.enum([
+    'ready_for_execution',
+    'awaiting_approval',
+    'rejected',
+    'expired',
+    'succeeded',
+    'failed',
+  ]),
   risk: riskLevelSchema,
   summary: z.string().min(1),
   approvalJobId: z.string().min(1).optional(),
+  detail: z.string().optional(),
+  artifactPath: z.string().min(1).optional(),
   updatedAt: z.string().datetime(),
 });
 

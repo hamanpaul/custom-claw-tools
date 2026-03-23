@@ -9,7 +9,7 @@ import type {
   IntakeResult,
   RiskDecision,
 } from './models.js';
-import { approvalJobSchema, intakeResultSchema } from './models.js';
+import { approvalJobSchema, companionRequestSchema, intakeResultSchema } from './models.js';
 
 export type IntakeArtifacts = {
   requestPath: string;
@@ -21,6 +21,11 @@ export type IntakeArtifacts = {
 
 export type DecisionArtifacts = {
   approvalPath: string;
+  resultPath: string;
+  auditPath: string;
+};
+
+export type ResultArtifacts = {
   resultPath: string;
   auditPath: string;
 };
@@ -87,6 +92,15 @@ export async function loadApprovalJob(layout: Layout, jobId: string): Promise<Ap
   return approvalJobSchema.parse(JSON.parse(await readFile(approvalPath, 'utf8')));
 }
 
+export async function loadRequestArtifact(
+  layout: Layout,
+  requestId: string,
+): Promise<CompanionRequest> {
+  const requestPath = buildRequestPath(layout, requestId);
+
+  return companionRequestSchema.parse(JSON.parse(await readFile(requestPath, 'utf8')));
+}
+
 export async function loadResultArtifact(layout: Layout, requestId: string): Promise<IntakeResult> {
   const resultPath = buildResultPath(layout, requestId);
 
@@ -145,6 +159,45 @@ export async function appendAuditEvent(
   return auditPath;
 }
 
+export async function persistResultUpdate(
+  layout: Layout,
+  input: {
+    result: IntakeResult;
+    event: string;
+    meta?: Record<string, unknown>;
+  },
+): Promise<ResultArtifacts> {
+  const resultPath = buildResultPath(layout, input.result.requestId);
+
+  await writeJsonAtomic(resultPath, input.result);
+
+  const auditPath = await appendAuditEvent(layout, input.result.requestId, input.event, {
+    resultStatus: input.result.status,
+    ...(input.meta ?? {}),
+  });
+
+  return {
+    resultPath,
+    auditPath,
+  };
+}
+
+export async function writeExecutionArtifact(
+  layout: Layout,
+  requestId: string,
+  suffix: string,
+  value: unknown,
+): Promise<string> {
+  const artifactPath = join(
+    layout.resultsDir,
+    `${toSafeSegment(requestId)}.${toSafeSegment(suffix)}.json`,
+  );
+
+  await writeJsonAtomic(artifactPath, value);
+
+  return artifactPath;
+}
+
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
 
@@ -157,6 +210,10 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
 
 function buildApprovalPath(layout: Layout, jobId: string): string {
   return join(layout.approvalsDir, `${toSafeSegment(jobId)}.json`);
+}
+
+function buildRequestPath(layout: Layout, requestId: string): string {
+  return join(layout.requestsDir, `${toSafeSegment(requestId)}.json`);
 }
 
 function buildResultPath(layout: Layout, requestId: string): string {
