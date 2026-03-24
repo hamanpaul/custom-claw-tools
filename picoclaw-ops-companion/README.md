@@ -110,6 +110,27 @@ cat request.json | npm run dev -- intake --request -
 - request / decision / result / audit artifact 落盤
 - `execute --request-id` 可執行已處於 `ready_for_execution` 的 request
 
+### TOTP secret 工具
+
+可以直接在專案裡產生一組新 secret：
+
+```bash
+npm run dev -- totp --account-name PaulClaw
+```
+
+如果你想自己在別處先產生 secret，再帶回 pi，也可以：
+
+```bash
+npm run dev -- totp --account-name PaulClaw --secret <YOUR_BASE32_SECRET>
+```
+
+這個工具會輸出：
+
+- 正規化後的 base32 secret
+- `otpauth://` URI
+- Authenticator app 手動輸入所需參數
+- 建議使用的 env 名稱：`PAULCALW_SECRET`
+
 ### 高風險任務
 
 - companion 先建立 approval job JSON
@@ -121,7 +142,7 @@ npm run dev -- decision --sender telegram:8313353234 --text "/approve <job-id> 1
 npm run dev -- decision --sender telegram:8313353234 --text "/reject <job-id>"
 ```
 
-- `approve` 需要配置 `PICOCLAW_TOTP_SECRET`
+- `approve` 需要配置 `PAULCALW_SECRET`（仍相容舊的 `PICOCLAW_TOTP_SECRET`）
 - 真正執行 layer 仍在下一個 Milestone 串接
 
 ### 低風險 execution（目前支援 `workspace_analysis`）

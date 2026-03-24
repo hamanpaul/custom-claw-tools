@@ -9,6 +9,7 @@ import { buildLayout, ensureLayout } from './layout.js';
 import { createLogger } from './logger.js';
 import { companionRequestSchema } from './models.js';
 import { buildApprovalJob, buildIntakeResult, classifyRisk } from './risk.js';
+import { buildTotpProvisioning } from './totp.js';
 
 async function main(): Promise<void> {
   const command = parseCliArgs(process.argv.slice(2));
@@ -25,8 +26,27 @@ async function main(): Promise<void> {
       notesRoot: config.notesRoot,
       opsRoot: layout.opsRoot,
       approvalTtlSeconds: config.approvalTtlSeconds,
+      totpAccountName: config.totpAccountName,
       totpIssuer: config.totpIssuer,
     });
+    return;
+  }
+
+  if (command.name === 'totp') {
+    const provisioning = buildTotpProvisioning({
+      secret: command.secret,
+      issuer: command.issuer ?? config.totpIssuer,
+      accountName: command.accountName ?? config.totpAccountName,
+    });
+
+    logger.log('info', 'totp provisioning material generated', {
+      generatedSecret: provisioning.generatedSecret,
+      issuer: provisioning.issuer,
+      accountName: provisioning.accountName,
+      preferredEnvVar: provisioning.preferredEnvVar,
+    });
+
+    process.stdout.write(`${JSON.stringify(provisioning, null, 2)}\n`);
     return;
   }
 

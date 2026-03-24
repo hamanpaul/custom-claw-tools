@@ -3,6 +3,12 @@ export type CliCommand =
       name: 'bootstrap';
     }
   | {
+      name: 'totp';
+      secret?: string;
+      accountName?: string;
+      issuer?: string;
+    }
+  | {
       name: 'intake';
       requestPath: string;
     }
@@ -19,6 +25,7 @@ export type CliCommand =
 const usage = [
   'Usage:',
   '  picoclaw-ops-companion bootstrap',
+  '  picoclaw-ops-companion totp [--account-name <name>] [--issuer <issuer>] [--secret <base32>]',
   '  picoclaw-ops-companion intake --request <path|->',
   '  picoclaw-ops-companion execute --request-id <request-id>',
   '  picoclaw-ops-companion decision --sender <sender> --text "</approve ...>"',
@@ -33,6 +40,20 @@ export function parseCliArgs(argv: string[]): CliCommand {
 
   if (command === 'bootstrap') {
     return { name: 'bootstrap' };
+  }
+
+  if (command === 'totp') {
+    const secretFlagIndex = rest.indexOf('--secret');
+    const accountNameFlagIndex = rest.indexOf('--account-name');
+    const issuerFlagIndex = rest.indexOf('--issuer');
+
+    return {
+      name: 'totp',
+      secret: secretFlagIndex === -1 ? undefined : rest[secretFlagIndex + 1],
+      accountName:
+        accountNameFlagIndex === -1 ? undefined : rest[accountNameFlagIndex + 1],
+      issuer: issuerFlagIndex === -1 ? undefined : rest[issuerFlagIndex + 1],
+    };
   }
 
   if (command === 'intake') {
