@@ -1,4 +1,6 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { chmod, mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
@@ -18,6 +20,14 @@ export type TotpProvisioning = {
     periodSeconds: 30;
     issuer: string;
     accountName: string;
+  };
+};
+
+export type TotpSecretFileWriteResult = TotpProvisioning & {
+  secretFile: {
+    path: string;
+    mode: '0600';
+    overwritten: boolean;
   };
 };
 
@@ -68,6 +78,52 @@ export function buildTotpProvisioning(input: {
   };
 }
 
+export async function writeTotpSecretFile(input: {
+  provisioning: TotpProvisioning;
+  force?: boolean;
+}): Promise<TotpSecretFileWriteResult> {
+  const secretFilePath = input.provisioning.recommendedSecretFilePath;
+  const secretDir = dirname(secretFilePath);
+  const existing = await detectExistingPathType(secretFilePath);
+
+  if (existing === 'directory') {
+    throw new Error(`TOTP secret path is not a file: ${secretFilePath}`);
+  }
+
+  if (existing === 'file' && !input.force) {
+    throw new Error(
+      `TOTP secret file already exists: ${secretFilePath}; rerun with --force to overwrite`,
+    );
+  }
+
+  await mkdir(secretDir, { recursive: true });
+  await chmod(secretDir, 0o700);
+
+  const tempPath = `${secretFilePath}.${process.pid}.${randomUUID()}.tmp`;
+
+  try {
+    await writeFile(tempPath, `${input.provisioning.secret}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    await chmod(tempPath, 0o600);
+    await rename(tempPath, secretFilePath);
+    await chmod(secretFilePath, 0o600);
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
+
+  return {
+    ...input.provisioning,
+    secretFile: {
+      path: secretFilePath,
+      mode: '0600',
+      overwritten: existing === 'file',
+    },
+  };
+}
+
 function buildOtpAuthUri(input: {
   issuer: string;
   accountName: string;
@@ -83,6 +139,30 @@ function buildOtpAuthUri(input: {
   });
 
   return `otpauth://totp/${encodeURIComponent(label)}?${params.toString()}`;
+}
+
+async function detectExistingPathType(
+  path: string,
+): Promise<'missing' | 'file' | 'directory'> {
+  try {
+    const pathStat = await stat(path);
+
+    if (pathStat.isDirectory()) {
+      return 'directory';
+    }
+
+    return 'file';
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error as NodeJS.ErrnoException).code === 'ENOENT'
+    ) {
+      return 'missing';
+    }
+
+    throw error;
+  }
 }
 
 function normalizeBase32Secret(secret: string): string {

@@ -33,7 +33,9 @@ export type AppConfig = {
   totpAccountName: string;
 };
 
-export function loadConfig(): AppConfig {
+export function loadConfig(options: {
+  skipTotpSecretResolution?: boolean;
+} = {}): AppConfig {
   const env = envSchema.parse(process.env);
   const totpSecretFile = resolve(
     env.PICOCLAW_TOTP_SECRET_FILE ??
@@ -47,18 +49,24 @@ export function loadConfig(): AppConfig {
     opsRootName: env.PICOCLAW_OPS_ROOT_NAME,
     approvalTtlSeconds: env.PICOCLAW_APPROVAL_TTL_SECONDS,
     logLevel: env.PICOCLAW_LOG_LEVEL,
-    totpSecret: resolveTotpSecret(env, totpSecretFile),
+    totpSecret: options.skipTotpSecretResolution
+      ? resolveInlineTotpSecret(env)
+      : resolveTotpSecret(env, totpSecretFile),
     totpSecretFile,
     totpIssuer: env.PICOCLAW_TOTP_ISSUER,
     totpAccountName: env.PICOCLAW_TOTP_ACCOUNT_NAME,
   };
 }
 
+function resolveInlineTotpSecret(env: z.infer<typeof envSchema>): string | undefined {
+  return env.PAULCALW_SECRET ?? env.PICOCLAW_TOTP_SECRET;
+}
+
 function resolveTotpSecret(
   env: z.infer<typeof envSchema>,
   totpSecretFile: string,
 ): string | undefined {
-  const inlineSecret = env.PAULCALW_SECRET ?? env.PICOCLAW_TOTP_SECRET;
+  const inlineSecret = resolveInlineTotpSecret(env);
 
   if (inlineSecret) {
     return inlineSecret;
