@@ -11,7 +11,9 @@ const envSchema = z.object({
   PICOCLAW_APPROVAL_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   PICOCLAW_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   PICOCLAW_TOTP_SECRET: z.string().min(1).optional(),
+  PAULCALW_SECRET: z.string().min(1).optional(),
   PICOCLAW_TOTP_ISSUER: z.string().default('PicoClaw Ops Companion'),
+  PICOCLAW_TOTP_ACCOUNT_NAME: z.string().default('picoclaw-ops-companion'),
 });
 
 export type AppConfig = {
@@ -23,6 +25,7 @@ export type AppConfig = {
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   totpSecret?: string;
   totpIssuer: string;
+  totpAccountName: string;
 };
 
 export function loadConfig(): AppConfig {
@@ -35,7 +38,8 @@ export function loadConfig(): AppConfig {
     opsRootName: env.PICOCLAW_OPS_ROOT_NAME,
     approvalTtlSeconds: env.PICOCLAW_APPROVAL_TTL_SECONDS,
     logLevel: env.PICOCLAW_LOG_LEVEL,
-    totpSecret: env.PICOCLAW_TOTP_SECRET,
+    totpSecret: env.PAULCALW_SECRET ?? env.PICOCLAW_TOTP_SECRET,
     totpIssuer: env.PICOCLAW_TOTP_ISSUER,
+    totpAccountName: env.PICOCLAW_TOTP_ACCOUNT_NAME,
   };
 }
