@@ -131,6 +131,21 @@ npm run dev -- totp --account-name PaulClaw --secret <YOUR_BASE32_SECRET>
 - Authenticator app 手動輸入所需參數
 - 建議使用的 env 名稱：`PAULCALW_SECRET`
 
+注意：
+
+- 目前這個工具**只會把 provisioning JSON 印到 stdout**，**不會自動另存成檔案**
+- 如果你只是要把 secret / `otpauth://` 貼進 Authenticator app，可以直接複製，不一定要存檔
+- 如果你要保留一份，建議先把它當成**敏感檔案**處理，至少用 `0600` 權限保存，而不是隨手放在一般目錄或長期依賴 env
+- 最簡單的做法是自行 redirect 到檔案後立刻收斂權限，例如：
+
+```bash
+npm run dev -- totp --account-name PaulClaw > /tmp/picoclaw-totp.json
+chmod 600 /tmp/picoclaw-totp.json
+```
+
+- 如果你之後把 secret 拆出來單獨放檔案，那個 secret file 也應該維持 `0600`
+- 這個 JSON 內含 TOTP secret，**不要 commit 到 repo**，匯入完成後若不需要，建議刪掉
+
 ### 高風險任務
 
 - companion 先建立 approval job JSON
