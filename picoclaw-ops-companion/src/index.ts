@@ -9,11 +9,14 @@ import { buildLayout, ensureLayout } from './layout.js';
 import { createLogger } from './logger.js';
 import { companionRequestSchema } from './models.js';
 import { buildApprovalJob, buildIntakeResult, classifyRisk } from './risk.js';
-import { buildTotpProvisioning } from './totp.js';
+import { buildTotpProvisioning, writeTotpSecretFile } from './totp.js';
 
 async function main(): Promise<void> {
   const command = parseCliArgs(process.argv.slice(2));
-  const config = loadConfig();
+  const config = loadConfig({
+    skipTotpSecretResolution:
+      command.name === 'totp' || command.name === 'totp-gen',
+  });
   const logger = createLogger(config.logLevel);
   const layout = buildLayout(config);
 
@@ -50,6 +53,30 @@ async function main(): Promise<void> {
     });
 
     process.stdout.write(`${JSON.stringify(provisioning, null, 2)}\n`);
+    return;
+  }
+
+  if (command.name === 'totp-gen') {
+    const provisioning = buildTotpProvisioning({
+      secret: command.secret,
+      issuer: command.issuer ?? config.totpIssuer,
+      accountName: command.accountName ?? config.totpAccountName,
+      recommendedSecretFilePath: config.totpSecretFile,
+    });
+    const generated = await writeTotpSecretFile({
+      provisioning,
+      force: command.force,
+    });
+
+    logger.log('info', 'totp secret file written', {
+      accountName: generated.accountName,
+      issuer: generated.issuer,
+      path: generated.secretFile.path,
+      overwritten: generated.secretFile.overwritten,
+      generatedSecret: generated.generatedSecret,
+    });
+
+    process.stdout.write(`${JSON.stringify(generated, null, 2)}\n`);
     return;
   }
 

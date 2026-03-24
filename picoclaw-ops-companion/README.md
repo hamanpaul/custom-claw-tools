@@ -112,16 +112,39 @@ cat request.json | npm run dev -- intake --request -
 
 ### TOTP secret 工具
 
-可以直接在專案裡產生一組新 secret：
+最簡單的做法，直接一步到位產生並寫入 `~/.config/picoclaw-ops-companion/totp.secret`：
+
+```bash
+npm run totp-gen -- --account-name PaulClaw
+```
+
+這個指令會：
+
+- 產生新的 base32 secret
+- 建立 `~/.config/picoclaw-ops-companion/`
+- 把 secret 寫到 `~/.config/picoclaw-ops-companion/totp.secret`
+- 把目錄權限收斂到 `0700`
+- 把 secret file 權限收斂到 `0600`
+- 同時把 `otpauth://`、manual entry 參數、secret file 路徑印到 stdout
+
+如果 `totp.secret` 已經存在，`totp-gen` 會**預設拒絕覆蓋**，避免你不小心把手機上已經在用的 2FA secret 換掉。
+
+真的要換掉舊 secret 時，再明確加：
+
+```bash
+npm run totp-gen -- --account-name PaulClaw --force
+```
+
+如果你想用自己先產生好的 base32 secret，也可以直接一步寫入：
+
+```bash
+npm run totp-gen -- --account-name PaulClaw --secret <YOUR_BASE32_SECRET>
+```
+
+如果你只想看 provisioning JSON、**不想落檔**，才用原本的 `totp`：
 
 ```bash
 npm run dev -- totp --account-name PaulClaw
-```
-
-如果你想自己在別處先產生 secret，再帶回 pi，也可以：
-
-```bash
-npm run dev -- totp --account-name PaulClaw --secret <YOUR_BASE32_SECRET>
 ```
 
 這個工具會輸出：
@@ -132,21 +155,6 @@ npm run dev -- totp --account-name PaulClaw --secret <YOUR_BASE32_SECRET>
 - 建議的 secret file 路徑
 - 建議使用的 env 名稱：`PAULCALW_SECRET`
 
-注意：
-
-- 目前這個工具**只會把 provisioning JSON 印到 stdout**，**不會自動另存成檔案**
-- 如果你只是要把 secret / `otpauth://` 貼進 Authenticator app，可以直接複製，不一定要存檔
-- 如果你要保留一份，建議先把它當成**敏感檔案**處理，至少用 `0600` 權限保存，而不是隨手放在一般目錄或長期依賴 env
-- 最簡單的做法是自行 redirect 到檔案後立刻收斂權限，例如：
-
-```bash
-npm run dev -- totp --account-name PaulClaw > /tmp/picoclaw-totp.json
-chmod 600 /tmp/picoclaw-totp.json
-```
-
-- 如果你之後把 secret 拆出來單獨放檔案，那個 secret file 也應該維持 `0600`
-- 這個 JSON 內含 TOTP secret，**不要 commit 到 repo**，匯入完成後若不需要，建議刪掉
-
 #### 建議的實際操作步驟（從零開始）
 
 1. 在 pi 上進到專案目錄：
@@ -155,71 +163,50 @@ chmod 600 /tmp/picoclaw-totp.json
 cd /home/haman/custom-claw-tools/picoclaw-ops-companion
 ```
 
-2. 產生一組新的 TOTP provisioning JSON，先暫存到 `/tmp`：
+2. 一步產生並寫入 secret file：
 
 ```bash
-npm run dev -- totp --account-name PaulClaw > /tmp/picoclaw-totp.json
-chmod 600 /tmp/picoclaw-totp.json
+npm run totp-gen -- --account-name PaulClaw
 ```
 
-3. 打開檔案，確認裡面有這些欄位：
+3. 指令輸出會直接告訴你：
 
+- `secretFile.path`
 - `secret`
 - `otpauthUri`
 - `manualEntry`
 
-例如：
-
-```bash
-cat /tmp/picoclaw-totp.json
-```
-
-4. 把 secret 單獨保存成較長期的私有檔案（建議路徑）：
-
-```bash
-mkdir -p ~/.config/picoclaw-ops-companion
-chmod 700 ~/.config/picoclaw-ops-companion
-python3 - <<'PY'
-import json
-from pathlib import Path
-data = json.loads(Path('/tmp/picoclaw-totp.json').read_text())
-Path.home().joinpath('.config/picoclaw-ops-companion/totp.secret').write_text(
-    data['secret'] + '\n',
-    encoding='utf-8',
-)
-PY
-chmod 600 ~/.config/picoclaw-ops-companion/totp.secret
-```
-
-5. 在手機 Authenticator app 加入新的 TOTP：
+4. 在手機 Authenticator app 加入新的 TOTP：
 
 - 若 app 支援手動輸入：
   - 帳號名稱：可自訂，例如 `PaulClaw`
-  - secret：填 `picoclaw-totp.json` 裡的 `secret`
+  - secret：填剛剛輸出的 `secret`
   - 類型：`TOTP`
   - 演算法：`SHA1`
   - 位數：`6`
   - 週期：`30`
-- 若 app 支援 `otpauth://` 匯入，則可使用 JSON 裡的 `otpauthUri`
+- 若 app 支援 `otpauth://` 匯入，則可使用輸出裡的 `otpauthUri`
 
-6. 存好 `~/.config/picoclaw-ops-companion/totp.secret` 之後，companion 會**預設自動從這個檔案讀 secret**，所以通常**不需要再手動 `export PAULCALW_SECRET=...`**
+5. 存好 `~/.config/picoclaw-ops-companion/totp.secret` 之後，companion 會**預設自動從這個檔案讀 secret**，所以通常**不需要再手動 `export PAULCALW_SECRET=...`**
 
-7. 只有在你想臨時覆蓋 secret、或做特殊除錯時，才需要用 env：
+6. 只有在你想臨時覆蓋 secret、或做特殊除錯時，才需要用 env：
 
 ```bash
 export PAULCALW_SECRET="$(cat ~/.config/picoclaw-ops-companion/totp.secret)"
 ```
 
-8. 之後收到高風險 approval job 時，就能用手機 App 上顯示的 6 位數 TOTP 回：
+7. 之後收到高風險 approval job 時，就能用手機 App 上顯示的 6 位數 TOTP 回：
 
 ```text
 /approve <job-id> <totp>
 ```
 
-9. 如果 `/tmp/picoclaw-totp.json` 不再需要，刪掉：
+#### 進階模式：只輸出、不落檔
+
+如果你只是想先看 JSON、不想直接寫入 `~/.config`，才用這個：
 
 ```bash
-rm -f /tmp/picoclaw-totp.json
+npm run dev -- totp --account-name PaulClaw
 ```
 
 ### 高風險任務
@@ -233,7 +220,7 @@ npm run dev -- decision --sender telegram:<PRIMARY_USER_ID> --text "/approve <jo
 npm run dev -- decision --sender telegram:<PRIMARY_USER_ID> --text "/reject <job-id>"
 ```
 
-- `approve` 需要配置 `PAULCALW_SECRET`（仍相容舊的 `PICOCLAW_TOTP_SECRET`）
+- `approve` 會優先讀 `~/.config/picoclaw-ops-companion/totp.secret`，也仍支援 `PAULCALW_SECRET` / `PICOCLAW_TOTP_SECRET`
 - 真正執行 layer 仍在下一個 Milestone 串接
 
 ### 低風險 execution（目前支援 `workspace_analysis`）
