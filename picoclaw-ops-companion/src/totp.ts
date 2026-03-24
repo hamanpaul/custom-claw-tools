@@ -8,6 +8,7 @@ export type TotpProvisioning = {
   issuer: string;
   accountName: string;
   otpauthUri: string;
+  recommendedSecretFilePath: string;
   preferredEnvVar: 'PAULCALW_SECRET';
   compatibleEnvVars: ['PAULCALW_SECRET', 'PICOCLAW_TOTP_SECRET'];
   manualEntry: {
@@ -24,6 +25,7 @@ export function buildTotpProvisioning(input: {
   secret?: string;
   issuer: string;
   accountName: string;
+  recommendedSecretFilePath: string;
 }): TotpProvisioning {
   const secret = input.secret
     ? normalizeBase32Secret(input.secret)
@@ -52,6 +54,7 @@ export function buildTotpProvisioning(input: {
       accountName,
       secret,
     }),
+    recommendedSecretFilePath: input.recommendedSecretFilePath,
     preferredEnvVar: 'PAULCALW_SECRET',
     compatibleEnvVars: ['PAULCALW_SECRET', 'PICOCLAW_TOTP_SECRET'],
     manualEntry: {

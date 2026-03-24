@@ -28,6 +28,7 @@ async function main(): Promise<void> {
       approvalTtlSeconds: config.approvalTtlSeconds,
       totpAccountName: config.totpAccountName,
       totpIssuer: config.totpIssuer,
+      totpSecretFile: config.totpSecretFile,
     });
     return;
   }
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
       secret: command.secret,
       issuer: command.issuer ?? config.totpIssuer,
       accountName: command.accountName ?? config.totpAccountName,
+      recommendedSecretFilePath: config.totpSecretFile,
     });
 
     logger.log('info', 'totp provisioning material generated', {
@@ -44,6 +46,7 @@ async function main(): Promise<void> {
       issuer: provisioning.issuer,
       accountName: provisioning.accountName,
       preferredEnvVar: provisioning.preferredEnvVar,
+      recommendedSecretFilePath: provisioning.recommendedSecretFilePath,
     });
 
     process.stdout.write(`${JSON.stringify(provisioning, null, 2)}\n`);

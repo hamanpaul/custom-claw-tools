@@ -89,7 +89,9 @@ export async function handleRelayDecision(
 
   if (decision.action === 'approve') {
     if (!config.totpSecret) {
-      throw new Error('PICOCLAW_TOTP_SECRET is required for approve decisions');
+      throw new Error(
+        `TOTP secret is required for approve decisions; set PAULCALW_SECRET, PICOCLAW_TOTP_SECRET, or ${config.totpSecretFile}`,
+      );
     }
 
     if (
