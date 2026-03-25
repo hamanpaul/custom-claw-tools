@@ -3,6 +3,11 @@ export type CliCommand =
       name: 'bootstrap';
     }
   | {
+      name: 'listen';
+      host?: string;
+      port?: number;
+    }
+  | {
       name: 'totp';
       secret?: string;
       accountName?: string;
@@ -32,6 +37,7 @@ export type CliCommand =
 const usage = [
   'Usage:',
   '  picoclaw-ops-companion bootstrap',
+  '  picoclaw-ops-companion listen [--host <host>] [--port <port>]',
   '  picoclaw-ops-companion totp [--account-name <name>] [--issuer <issuer>] [--secret <base32>]',
   '  picoclaw-ops-companion totp-gen [--account-name <name>] [--issuer <issuer>] [--secret <base32>] [--force]',
   '  picoclaw-ops-companion intake --request <path|->',
@@ -48,6 +54,20 @@ export function parseCliArgs(argv: string[]): CliCommand {
 
   if (command === 'bootstrap') {
     return { name: 'bootstrap' };
+  }
+
+  if (command === 'listen') {
+    const hostFlagIndex = rest.indexOf('--host');
+    const portFlagIndex = rest.indexOf('--port');
+
+    return {
+      name: 'listen',
+      host: hostFlagIndex === -1 ? undefined : rest[hostFlagIndex + 1],
+      port:
+        portFlagIndex === -1
+          ? undefined
+          : parsePort(rest[portFlagIndex + 1], '--port'),
+    };
   }
 
   if (command === 'totp') {
@@ -125,4 +145,18 @@ export function parseCliArgs(argv: string[]): CliCommand {
   }
 
   throw new Error(`unknown command: ${command}\n${usage}`);
+}
+
+function parsePort(value: string | undefined, flagName: string): number {
+  if (value === undefined) {
+    throw new Error(`${flagName} requires a numeric value\n${usage}`);
+  }
+
+  const parsed = Number.parseInt(value, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    throw new Error(`${flagName} must be a valid TCP port\n${usage}`);
+  }
+
+  return parsed;
 }

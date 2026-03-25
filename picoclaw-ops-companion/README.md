@@ -64,7 +64,7 @@
 
 - 語言：Node.js / TypeScript
 - AI runtime：GitHub Copilot SDK
-- 執行模式：以 pi3 使用者態為主，優先使用本機 `stdio`，必要時才考慮 loopback server
+- 執行模式：以 pi3 使用者態為主；目前已提供 `127.0.0.1` loopback listener，Copilot SDK session 仍以本機 process / CLI server 執行
 - Approval channel：沿用 PicoClaw Telegram channel
 - 目標 repo：`/home/haman/custom-claw-tools/picoclaw-ops-companion`
 
@@ -109,6 +109,35 @@ cat request.json | npm run dev -- intake --request -
 - approval job 生成（僅 high risk）
 - request / decision / result / audit artifact 落盤
 - `execute --request-id` 可執行已處於 `ready_for_execution` 的 request
+
+### 啟動 loopback listener
+
+如果要讓其他本機程序（例如 PicoClaw relay / wrapper）透過 `127.0.0.1` 打 companion，可直接啟動：
+
+```bash
+npm run dev -- listen --host 127.0.0.1 --port 45450
+```
+
+可用 endpoint：
+
+- `GET /health`
+- `POST /intake`
+- `POST /decision`
+- `POST /execute`
+
+最簡單的 health probe：
+
+```bash
+curl http://127.0.0.1:45450/health
+```
+
+範例：把 request 丟進 loopback intake
+
+```bash
+curl -X POST http://127.0.0.1:45450/intake \
+  -H 'content-type: application/json' \
+  --data @request.json
+```
 
 ### TOTP secret 工具
 
@@ -221,15 +250,15 @@ npm run dev -- decision --sender telegram:<PRIMARY_USER_ID> --text "/reject <job
 ```
 
 - `approve` 會優先讀 `~/.config/picoclaw-ops-companion/totp.secret`，也仍支援 `PAULCALW_SECRET` / `PICOCLAW_TOTP_SECRET`
-- 真正執行 layer 仍在下一個 Milestone 串接
-
-### 低風險 execution（目前支援 `workspace_analysis`）
+- 高風險 execution layer（如 `repo_relay_push` / 高權限 `npm_install_package`）仍在後續 Milestone 串接
+### 低風險 execution（目前支援 `workspace_analysis` 與 `github_research`）
 
 ```bash
 npm run dev -- execute --request-id <request-id>
 ```
 
-- 目前真的有實作的 allowlisted execution wrapper 是 `workspace_analysis`
+- `workspace_analysis` 仍走本地 deterministic wrapper
+- `github_research` 會建立受限的 GitHub Copilot SDK session，並只放行 companion 自訂的 read-only GitHub search tool
 - 其他 request type 會明確寫回 `not implemented`，不會假裝成功
 
 ## 部署與前置需求

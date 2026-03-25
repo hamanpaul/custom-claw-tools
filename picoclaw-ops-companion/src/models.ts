@@ -34,10 +34,10 @@ const githubResearchRequestSchema = requestEnvelopeSchema.extend({
     });
   }
 
-  if (value.scope === 'org' && !value.target.owner) {
+  if ((value.scope === 'org' || value.scope === 'user') && !value.target.owner) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'github_research with org scope requires target.owner',
+      message: `github_research with ${value.scope} scope requires target.owner`,
       path: ['target', 'owner'],
     });
   }
