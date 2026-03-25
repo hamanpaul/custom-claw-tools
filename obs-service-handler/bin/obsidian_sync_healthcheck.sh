@@ -108,11 +108,25 @@ fi
 
 runner_pid="$(read_runner_pid)"
 runner_state="$(process_state "$runner_pid")"
+matching_runners="$(list_vault_runner_entries || true)"
 if [ -z "$runner_pid" ] || [ "$runner_state" = "missing" ]; then
-  write_incident_log 'runner-pid-missing' transient
-  remove_stale_lock
-  restart_sync 'runner pid missing'
-  exit 0
+  recovered_runner_pid=""
+  if [ -n "$matching_runners" ]; then
+    recovered_runner_pid="$(printf '%s
+' "$matching_runners" | awk 'NR==1 {print $1}')"
+  fi
+  if [ -n "$recovered_runner_pid" ]; then
+    runner_pid="$recovered_runner_pid"
+    printf '%s
+' "$runner_pid" >"$RUNNER_PID_FILE"
+    runner_state="$(process_state "$runner_pid")"
+    log "recovered runner pid file from active sync process: $runner_pid"
+  else
+    write_incident_log 'runner-pid-missing' transient
+    remove_stale_lock
+    restart_sync 'runner pid missing'
+    exit 0
+  fi
 fi
 if [[ "$runner_state" == Z* ]]; then
   write_incident_log 'runner-pid-zombie' transient
@@ -120,8 +134,6 @@ if [[ "$runner_state" == Z* ]]; then
   restart_sync "runner zombie ($runner_state)"
   exit 0
 fi
-
-matching_runners="$(list_vault_runner_entries || true)"
 if [ -z "$matching_runners" ] || ! printf '%s
 ' "$matching_runners" | awk '{print $1}' | grep -qx "$runner_pid"; then
   write_incident_log 'runner-path-mismatch' transient
