@@ -11,6 +11,7 @@ import {
   persistResultUpdate,
   writeExecutionArtifact,
 } from './artifacts.js';
+import { runGithubResearchCopilot } from './copilot.js';
 
 export async function executeRequest(
   layout: Layout,
@@ -38,32 +39,116 @@ export async function executeRequest(
     );
   }
 
-  if (request.type !== 'workspace_analysis') {
-    const failedResult: IntakeResult = {
+  switch (request.type) {
+    case 'workspace_analysis':
+      return executeWorkspaceAnalysis(layout, config, request, result);
+
+    case 'github_research':
+      return executeGithubResearch(layout, config, request, result);
+
+    default: {
+      const failedResult: IntakeResult = {
+        ...result,
+        status: 'failed',
+        summary: `execution wrapper for ${request.type} is not implemented yet`,
+        detail:
+          'Only workspace_analysis and github_research are executable in the current MVP slice.',
+        updatedAt: new Date().toISOString(),
+      };
+      const artifacts = await persistResultUpdate(layout, {
+        result: failedResult,
+        event: 'execution_not_implemented',
+        meta: {
+          requestType: request.type,
+        },
+      });
+
+      return {
+        requestId,
+        type: request.type,
+        resultStatus: failedResult.status,
+        summary: failedResult.summary,
+        auditPath: artifacts.auditPath,
+      };
+    }
+  }
+}
+
+async function executeGithubResearch(
+  layout: Layout,
+  config: AppConfig,
+  request: Extract<CompanionRequest, { type: 'github_research' }>,
+  result: IntakeResult,
+): Promise<{
+  requestId: string;
+  type: CompanionRequest['type'];
+  resultStatus: IntakeResult['status'];
+  summary: string;
+  artifactPath?: string;
+  auditPath: string;
+}> {
+  try {
+    await appendAuditEvent(layout, request.requestId, 'execution_copilot_session_started', {
+      requestType: request.type,
+      scope: request.scope,
+      mode: request.payload.mode,
+      limit: request.payload.limit,
+      target: request.target,
+    });
+
+    const artifact = await runGithubResearchCopilot(config, request);
+    const artifactPath = await writeExecutionArtifact(
+      layout,
+      request.requestId,
+      'github-research',
+      artifact,
+    );
+    const succeededResult: IntakeResult = {
       ...result,
-      status: 'failed',
-      summary: `execution wrapper for ${request.type} is not implemented yet`,
-      detail: 'Only workspace_analysis is executable in the current MVP slice.',
+      status: 'succeeded',
+      summary: `github research completed for ${describeGitHubResearchTarget(request)}`,
+      detail: `mode=${request.payload.mode}, totalCount=${artifact.search.totalCount}, toolCalls=${artifact.toolInvocations.length}`,
+      artifactPath,
       updatedAt: new Date().toISOString(),
     };
     const artifacts = await persistResultUpdate(layout, {
-      result: failedResult,
-      event: 'execution_not_implemented',
+      result: succeededResult,
+      event: 'execution_succeeded',
       meta: {
         requestType: request.type,
+        artifactPath,
+        sessionId: artifact.sessionId,
+        toolCalls: artifact.toolInvocations.length,
       },
     });
 
     return {
-      requestId,
+      requestId: request.requestId,
       type: request.type,
-      resultStatus: failedResult.status,
-      summary: failedResult.summary,
+      resultStatus: succeededResult.status,
+      summary: succeededResult.summary,
+      artifactPath,
       auditPath: artifacts.auditPath,
     };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const failedResult: IntakeResult = {
+      ...result,
+      status: 'failed',
+      summary: `github research failed for ${describeGitHubResearchTarget(request)}`,
+      detail: message,
+      updatedAt: new Date().toISOString(),
+    };
+    await persistResultUpdate(layout, {
+      result: failedResult,
+      event: 'execution_failed',
+      meta: {
+        requestType: request.type,
+        error: message,
+      },
+    });
+    throw error;
   }
-
-  return executeWorkspaceAnalysis(layout, config, request, result);
 }
 
 async function executeWorkspaceAnalysis(
@@ -240,4 +325,10 @@ function resolveAllowedRoot(
     case 'repo':
       return config.projectRoot;
   }
+}
+
+function describeGitHubResearchTarget(
+  request: Extract<CompanionRequest, { type: 'github_research' }>,
+): string {
+  return request.target.repo ?? request.target.owner ?? 'global-github';
 }

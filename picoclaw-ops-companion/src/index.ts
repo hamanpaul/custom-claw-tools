@@ -1,14 +1,15 @@
 import { readFile } from 'node:fs/promises';
 
-import { handleRelayDecision } from './approvals.js';
-import { persistRequestIntake } from './artifacts.js';
 import { parseCliArgs } from './cli.js';
 import { loadConfig } from './config.js';
-import { executeRequest } from './execution.js';
 import { buildLayout, ensureLayout } from './layout.js';
 import { createLogger } from './logger.js';
-import { companionRequestSchema } from './models.js';
-import { buildApprovalJob, buildIntakeResult, classifyRisk } from './risk.js';
+import {
+  processExecutionRequest,
+  processIntakeRequest,
+  processRelayDecision,
+} from './operations.js';
+import { startLoopbackServer } from './server.js';
 import { buildTotpProvisioning, writeTotpSecretFile } from './totp.js';
 
 async function main(): Promise<void> {
@@ -28,6 +29,11 @@ async function main(): Promise<void> {
       workspaceRoot: config.workspaceRoot,
       notesRoot: config.notesRoot,
       opsRoot: layout.opsRoot,
+      listenHost: config.listenHost,
+      listenPort: config.listenPort,
+      copilotModel: config.copilotModel ?? null,
+      copilotCliPath: config.copilotCliPath ?? null,
+      copilotCliUrl: config.copilotCliUrl ?? null,
       approvalTtlSeconds: config.approvalTtlSeconds,
       totpAccountName: config.totpAccountName,
       totpIssuer: config.totpIssuer,
@@ -80,50 +86,35 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command.name === 'listen') {
+    await startLoopbackServer(layout, config, logger, {
+      host: command.host,
+      port: command.port,
+    });
+    return;
+  }
+
   if (command.name === 'intake') {
-    const request = companionRequestSchema.parse(
+    const outcome = await processIntakeRequest(
+      layout,
+      config,
       JSON.parse(await readRequestSource(command.requestPath)),
     );
-    const decision = classifyRisk(request);
-    const approvalJob = decision.requiresApproval
-      ? buildApprovalJob(request, decision, config)
-      : undefined;
-    const result = buildIntakeResult(request, decision, approvalJob);
-    const artifacts = await persistRequestIntake(layout, {
-      request,
-      decision,
-      approvalJob,
-      result,
-    });
 
     logger.log('info', 'request intake complete', {
-      requestId: request.requestId,
-      type: request.type,
-      risk: decision.risk,
-      requiresApproval: decision.requiresApproval,
-      approvalJobId: approvalJob?.jobId,
+      requestId: outcome.requestId,
+      type: outcome.type,
+      risk: outcome.risk,
+      requiresApproval: outcome.requiresApproval,
+      approvalJobId: outcome.approvalJobId,
     });
 
-    process.stdout.write(
-      `${JSON.stringify(
-        {
-          requestId: request.requestId,
-          type: request.type,
-          risk: decision.risk,
-          requiresApproval: decision.requiresApproval,
-          approvalJobId: approvalJob?.jobId ?? null,
-          resultStatus: result.status,
-          artifacts,
-        },
-        null,
-        2,
-      )}\n`,
-    );
+    process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
     return;
   }
 
   if (command.name === 'execute') {
-    const outcome = await executeRequest(layout, config, command.requestId);
+    const outcome = await processExecutionRequest(layout, config, command.requestId);
 
     logger.log('info', 'request execution complete', outcome);
 
@@ -131,7 +122,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const outcome = await handleRelayDecision(layout, config, {
+  const outcome = await processRelayDecision(layout, config, {
     sender: command.sender,
     text: command.text,
   });
