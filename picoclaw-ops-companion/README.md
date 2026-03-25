@@ -77,6 +77,9 @@ picoclaw-ops-companion/
     plan.md
     spec.md
     todo.md
+  skills/
+    ops-companion/
+      SKILL.md
   src/
   package.json
   tsconfig.json
@@ -280,3 +283,4 @@ npm run dev -- execute --request-id <request-id>
 - `docs/plan.md`：實作分階段計畫
 - `docs/spec.md`：整體系統規格與資料模型
 - `docs/todo.md`：落地工作拆解
+- `skills/ops-companion/SKILL.md`：repo 內追蹤的 PicoClaw skill 文案，對應 live `~/.picoclaw/workspace/skills/ops-companion/SKILL.md`
