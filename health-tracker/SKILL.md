@@ -11,10 +11,13 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 
 - live skill path: `/home/haman/.picoclaw/workspace/skills/health-tracker/SKILL.md`
 - repo copy path: `/home/haman/custom-claw-tools/health-tracker/SKILL.md`
+- repo templates root: `/home/haman/custom-claw-tools/health-tracker/templates`
 - health root: `/home/haman/.picoclaw/workspace/notes/claw/health`
 - raw root: `/home/haman/.picoclaw/workspace/notes/claw/health/raw`
 - daily root: `/home/haman/.picoclaw/workspace/notes/claw/health/daily`
 - reports root: `/home/haman/.picoclaw/workspace/notes/claw/health/reports`
+- live templates root: `/home/haman/.picoclaw/workspace/notes/claw/health/templates`
+- skill-local template mirror: `/home/haman/.picoclaw/workspace/skills/health-tracker/templates`
 
 ## 何時使用這個 skill
 
@@ -44,6 +47,13 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
   - 使用者手動輸入
   - `notes/claw/health` 內既有檔案
 - 每一筆資料都要保留來源追溯資訊
+
+## 語言規則
+
+- 日誌、報表、欄位標題、摘要與缺資料說明預設使用 `zh-TW`
+- 藥名、保健品名稱、檢驗項目、原始表格欄名可保留原文，再補上 `zh-TW` 說明
+- 若來源內容是英文或 OCR 文字，raw record 保留原文，daily 與 report 用 `zh-TW` 整理
+- 檔名可維持英文與日期格式，但檔案內容預設為 `zh-TW`
 
 ## 角色分工
 
@@ -104,32 +114,57 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
    - 若是即時餐點或運動紀錄，預設為今天
    - 若日期不明，摘要中要直接說明
 
-2. 先保存 raw 證據
+2. 先檢查模板
+   - 若目標日誌或報表不存在，優先從對應模板建立
+   - 優先使用 `live templates root`
+   - 若 live templates 不存在，再依 `repo templates root` 的欄位結構建立
+
+3. 先保存 raw 證據
    - 在做彙總前，先在 `raw/` 寫一筆原始紀錄
    - 保留原始文字、OCR 結果或 connector 輸出
    - 記錄來源、時間與信心
 
-3. 更新 daily record
+4. 更新 daily record
    - 將該輸入合併到對應日期的 daily 檔
    - 只更新相關區塊
    - 不要用較弱的猜測覆蓋較強的證據
 
-4. 只估算能支撐的內容
+5. 只估算能支撐的內容
    - 有標示、表格或明確數字時，用精確值
    - 沒有精確值時，才使用 heuristic
    - 所有估值都要附信心
 
-5. 只在有需要時產生週期報表
+6. 只在有需要時產生週期報表
    - daily: 當日追蹤
    - monthly: 月度趨勢與遵循情況
    - quarterly: 較廣的趨勢與一致性
    - yearly: 高層級長期變化
 
-6. 回覆要精簡
+7. 回覆要精簡
    - 說明這次寫入了什麼
    - 列出最重要的計算值
    - 說明缺資料或低信心項目
    - 需要時附上檔案路徑
+
+## 模板檔案
+
+若要新建檔案，優先使用以下模板：
+
+- canonical live template root：`/home/haman/.picoclaw/workspace/notes/claw/health/templates`
+- skill-local template mirror：`/home/haman/.picoclaw/workspace/skills/health-tracker/templates`
+- raw record template: `/home/haman/.picoclaw/workspace/notes/claw/health/templates/raw-record-template.md`
+- daily log template: `/home/haman/.picoclaw/workspace/notes/claw/health/templates/daily-log-template.md`
+- monthly report template: `/home/haman/.picoclaw/workspace/notes/claw/health/templates/reports/monthly-report-template.md`
+- quarterly report template: `/home/haman/.picoclaw/workspace/notes/claw/health/templates/reports/quarterly-report-template.md`
+- yearly report template: `/home/haman/.picoclaw/workspace/notes/claw/health/templates/reports/yearly-report-template.md`
+
+若 live template 尚未同步，可參考 repo 版本：
+
+- `/home/haman/custom-claw-tools/health-tracker/templates/raw-record-template.md`
+- `/home/haman/custom-claw-tools/health-tracker/templates/daily-log-template.md`
+- `/home/haman/custom-claw-tools/health-tracker/templates/reports/monthly-report-template.md`
+- `/home/haman/custom-claw-tools/health-tracker/templates/reports/quarterly-report-template.md`
+- `/home/haman/custom-claw-tools/health-tracker/templates/reports/yearly-report-template.md`
 
 ## Raw record 規格
 
@@ -382,4 +417,4 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 - 列出缺資料
 - 說明更新或建立了哪個檔案
 
-保持簡短、結構化、誠實。
+保持簡短、結構化、誠實，並預設使用 `zh-TW`。
