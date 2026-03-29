@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOME_DIR="${HOME:-/home/haman}"
+PROJECT_ROOT="${PROJECT_ROOT:-$HOME_DIR/custom-claw-tools/picoclaw-ops-companion}"
+NODE_BIN="${NODE_BIN:-$HOME_DIR/.nvm/versions/node/v22.20.0/bin/node}"
+HOST="${PICOCLAW_OPS_LISTEN_HOST:-127.0.0.1}"
+PORT="${PICOCLAW_OPS_LISTEN_PORT:-45450}"
+
+cd "$PROJECT_ROOT"
+
+if [ -f "$PROJECT_ROOT/dist/index.js" ]; then
+  exec "$NODE_BIN" "$PROJECT_ROOT/dist/index.js" listen --host "$HOST" --port "$PORT"
+fi
+
+if [ -x "$PROJECT_ROOT/node_modules/.bin/tsx" ]; then
+  exec "$PROJECT_ROOT/node_modules/.bin/tsx" "$PROJECT_ROOT/src/index.ts" listen --host "$HOST" --port "$PORT"
+fi
+
+printf 'picoclaw-ops-companion listener cannot start: missing dist/index.js and tsx fallback\n' >&2
+exit 1
