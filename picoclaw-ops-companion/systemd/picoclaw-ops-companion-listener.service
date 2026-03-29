@@ -1,0 +1,19 @@
+[Unit]
+Description=PicoClaw Ops Companion loopback listener
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/custom-claw-tools/picoclaw-ops-companion
+Environment=HOME=%h
+Environment=PICOCLAW_OPS_LISTEN_HOST=127.0.0.1
+Environment=PICOCLAW_OPS_LISTEN_PORT=45450
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/custom-claw-tools/picoclaw-ops-companion/bin/picoclaw-ops-companion-listen
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

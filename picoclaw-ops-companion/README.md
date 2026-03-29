@@ -134,6 +134,30 @@ npm run dev -- listen --host 127.0.0.1 --port 45450
 curl http://127.0.0.1:45450/health
 ```
 
+### 讓 loopback listener 開機常駐
+
+repo 內提供 user-level systemd unit：
+
+- `systemd/picoclaw-ops-companion-listener.service`
+- `bin/picoclaw-ops-companion-listen`
+
+部署到 pi3 後可用：
+
+```bash
+cd /home/haman/custom-claw-tools/picoclaw-ops-companion
+chmod +x bin/picoclaw-ops-companion-listen
+cp systemd/picoclaw-ops-companion-listener.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now picoclaw-ops-companion-listener.service
+```
+
+驗證：
+
+```bash
+systemctl --user status picoclaw-ops-companion-listener.service
+curl http://127.0.0.1:45450/health
+```
+
 範例：把 request 丟進 loopback intake
 
 ```bash
