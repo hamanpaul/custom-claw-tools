@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")"/.. && pwd)"
+HOST="${OBS_AUTO_MOC_LISTEN_HOST:-127.0.0.1}"
+PORT="${OBS_AUTO_MOC_LISTEN_PORT:-45460}"
+RUN_PIPELINE="${OBS_AUTO_MOC_RUN_PIPELINE:-1}"
+
+export PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
+ARGS=(python3 -m obs_auto_moc.cli listen --host "$HOST" --port "$PORT")
+
+if [ "${OBS_AUTO_MOC_SYNC_ROOT:-}" != "" ]; then
+  ARGS+=(--sync-root "$OBS_AUTO_MOC_SYNC_ROOT")
+fi
+
+if [ "${OBS_AUTO_MOC_VAULT_PATH:-}" != "" ]; then
+  ARGS+=(--vault-path "$OBS_AUTO_MOC_VAULT_PATH")
+fi
+
+if [ "${OBS_AUTO_MOC_ARTIFACTS_ROOT:-}" != "" ]; then
+  ARGS+=(--artifacts-root "$OBS_AUTO_MOC_ARTIFACTS_ROOT")
+fi
+
+if [ "${OBS_AUTO_MOC_ROOT_NOTE_PATH:-}" != "" ]; then
+  ARGS+=(--root-note-path "$OBS_AUTO_MOC_ROOT_NOTE_PATH")
+fi
+
+if [ "${OBS_AUTO_MOC_PIPELINE_ROOT:-}" != "" ]; then
+  ARGS+=(--pipeline-root "$OBS_AUTO_MOC_PIPELINE_ROOT")
+fi
+
+if [ "$RUN_PIPELINE" = "1" ] || [ "$RUN_PIPELINE" = "true" ]; then
+  ARGS+=(--run-pipeline)
+fi
+
+exec "${ARGS[@]}" "$@"

@@ -1,0 +1,19 @@
+[Unit]
+Description=obs-auto-moc loopback listener
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/custom-claw-tools/obs-auto-moc
+Environment=HOME=%h
+Environment=OBS_AUTO_MOC_LISTEN_HOST=127.0.0.1
+Environment=OBS_AUTO_MOC_LISTEN_PORT=45460
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/custom-claw-tools/obs-auto-moc/bin/obs-auto-moc-listen
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

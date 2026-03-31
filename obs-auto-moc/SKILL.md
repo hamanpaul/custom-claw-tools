@@ -76,6 +76,28 @@ description: "建立 review-first 的 Obsidian MOC manifest、proposal 與 previ
    - 列出最重要的 warning
    - 若有 apply，明確說 live `MOC.md` 已更新
 
+## root-note pipeline scaffold
+
+目前 repo 內已加入第一版 script-side scaffold，對應 `root-note -> PicoClaw -> destination MOC` 流程：
+
+- `monitor-root-note`：掃描 `root-note/`，只對變更檔案產出 PicoClaw handoff artifact
+- `apply-picoclaw-report --report <file>`：吃結構化 PicoClaw 完成回報，更新 pipeline state，並刷新 touched destination MOC
+- `queue-picoclaw-report --report <file> [--run-pipeline]`：驗證回報後先放入 report inbox，必要時立刻跑一輪 pipeline
+- `refresh-destination-mocs`：直接重建 `TechVault` / `WorkVault` / `PersonalVault` 的 `MOC.md`
+- `dispatch-picoclaw-handoff --handoff <file>`：把 handoff job 直接交給 live PicoClaw，擷取結構化 report，再餵回 pipeline
+- `run-pipeline-once`：先吃 report inbox 裡的 PicoClaw 完成回報，再從 `root-note/` 產出下一個 handoff job；若 auto-dispatch 開啟，會立刻把 handoff 送進 live PicoClaw
+- `listen --host 127.0.0.1 --port 45460 --run-pipeline`：提供 loopback `GET /health` 與 `POST /picoclaw-report` callback ingestion
+- handoff artifact 的 `callback_contract.endpoint` 預設會指向 `http://127.0.0.1:45460/picoclaw-report`
+- handoff artifact 會附上 `vault_path` 與 destination root paths，讓 PicoClaw 在回報前先建立目的筆記
+
+注意：
+
+- Stage 2 agent 由 live PicoClaw 執行，不是在 `obs-auto-moc` 內執行
+- Stage 2 規則入口已對齊到 pi3 notes 內的 `ObsToolsVault/README.md`，更細的遷移規則在 `ObsToolsVault/specs/`
+- pi3 上已啟用 user-level `obs-auto-moc-listener.service` + `obs-auto-moc-pipeline.timer`
+- `bin/obs-auto-moc-runner` 預設會開 `OBS_AUTO_MOC_AUTO_DISPATCH=1`，並使用 `cron:obs-auto-moc` session 自動把 handoff 送進 PicoClaw
+- `bin/obs-auto-moc-listen` / `bin/obs-auto-moc-runner` 支援 `OBS_AUTO_MOC_SYNC_ROOT`、`OBS_AUTO_MOC_VAULT_PATH`、`OBS_AUTO_MOC_AUTO_DISPATCH`、`OBS_AUTO_MOC_PICOCLAW_SESSION` 等環境覆寫，可先對暫時 vault 做 smoke 再切回 live notes
+
 ## 常用指令
 
 ### Preview build
