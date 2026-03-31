@@ -13,6 +13,7 @@ LOG_PATH="${LOG_PATH:-$STATE_DIR/obsidian-sync-healthcheck.log}"
 RESTART_STAMP="${RESTART_STAMP:-$STATE_DIR/obsidian-sync-last-restart.epoch}"
 STALE_LOCK_SECS="${STALE_LOCK_SECS:-15}"
 RESTART_COOLDOWN_SECS="${RESTART_COOLDOWN_SECS:-30}"
+STALL_THRESHOLD_SECS="${STALL_THRESHOLD_SECS:-900}"
 
 ensure_runtime_dirs
 exec >>"$LOG_PATH" 2>&1
@@ -62,8 +63,12 @@ if ! resolve_sync_config; then
 fi
 
 LOCK_PATH="${LOCK_PATH:-$LOADED_VAULT_PATH/$CONFIG_DIR/.sync.lock}"
+set_default_sync_progress_log_path
 log "healthcheck loaded config: $LOADED_CONFIG_FILE"
 log "healthcheck loaded path: $LOADED_VAULT_PATH"
+if [ -n "${SYNC_PROGRESS_LOG_PATH:-}" ]; then
+  log "healthcheck loaded progress log: $SYNC_PROGRESS_LOG_PATH"
+fi
 
 if [ ! -f "$AUTH_TOKEN_PATH" ] && [ -z "${OBSIDIAN_AUTH_TOKEN:-}" ]; then
   write_incident_log 'healthcheck-auth-token-missing' terminal_auth
@@ -147,6 +152,19 @@ if [ "$age" -ge 0 ] && [ "$age" -gt "$STALE_LOCK_SECS" ]; then
   remove_stale_lock
   restart_sync "stale lock age ${age}s"
   exit 0
+fi
+
+progress_probe="$(sync_progress_probe_path || true)"
+progress_age=-1
+if [ -n "$progress_probe" ]; then
+  progress_age="$(file_age "$progress_probe")"
+  if [ "$progress_age" -ge 0 ] && [ "$progress_age" -gt "$STALL_THRESHOLD_SECS" ]; then
+    SYNC_PROGRESS_LOG_PATH="$progress_probe"
+    write_incident_log 'sync-progress-stalled' transient
+    remove_stale_lock
+    restart_sync "sync progress stalled (${progress_age}s): $progress_probe"
+    exit 0
+  fi
 fi
 
 log "health ok: main_pid=$main_pid main_state=$main_state runner_pid=$runner_pid runner_state=$runner_state path=$LOADED_VAULT_PATH lock_age=$age"

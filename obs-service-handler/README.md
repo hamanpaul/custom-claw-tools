@@ -73,12 +73,14 @@ incident log 會寫到：
   - zombie process
   - lock / runner mismatch
   - active runner 與 loaded vault path 是否一致
+  - `sync.log` / guard log 是否長時間沒有任何進展（預設 `STALL_THRESHOLD_SECS=900`）
 - incident log 會包含：
   - config file
   - loaded vault path
   - main pid / runner pid / process state
   - matching runners
   - lock path / lock age / lock stat
+  - sync progress log path / age / stat
   - detail tail
 
 ## 實機部署備註

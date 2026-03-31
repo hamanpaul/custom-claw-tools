@@ -115,13 +115,18 @@ PY
 
 lock_age() {
   local lock_path="${1:-}"
-  if [ ! -e "$lock_path" ]; then
+  file_age "$lock_path"
+}
+
+file_age() {
+  local file_path="${1:-}"
+  if [ -z "$file_path" ] || [ ! -e "$file_path" ]; then
     echo -1
     return 0
   fi
   local now mtime
   now="$(date +%s)"
-  mtime="$(stat -c %Y "$lock_path" 2>/dev/null || echo 0)"
+  mtime="$(stat -c %Y "$file_path" 2>/dev/null || echo 0)"
   echo "$(( now - mtime ))"
 }
 
@@ -178,6 +183,22 @@ PY
 
 list_vault_runner_pids() {
   list_vault_runner_entries | awk '{print $1}'
+}
+
+set_default_sync_progress_log_path() {
+  if [ -z "${SYNC_PROGRESS_LOG_PATH:-}" ] && [ -n "${LOADED_CONFIG_FILE:-}" ]; then
+    SYNC_PROGRESS_LOG_PATH="$(dirname "$LOADED_CONFIG_FILE")/sync.log"
+  fi
+}
+
+sync_progress_probe_path() {
+  if [ -n "${SYNC_PROGRESS_LOG_PATH:-}" ] && [ -e "$SYNC_PROGRESS_LOG_PATH" ]; then
+    printf '%s\n' "$SYNC_PROGRESS_LOG_PATH"
+    return 0
+  fi
+  if [ -e "$STATE_DIR/obsidian-sync-guard.log" ]; then
+    printf '%s\n' "$STATE_DIR/obsidian-sync-guard.log"
+  fi
 }
 
 set_terminal_stop_flag() {
@@ -252,6 +273,13 @@ write_incident_log() {
       printf '%s
 ' "$RESOLVE_SYNC_CONFIG_ERROR"
     fi
+    if [ -n "${SYNC_PROGRESS_LOG_PATH:-}" ]; then
+      echo "sync_progress_log_path=$SYNC_PROGRESS_LOG_PATH"
+      echo "sync_progress_log_age=$(file_age "$SYNC_PROGRESS_LOG_PATH")"
+      if [ -e "$SYNC_PROGRESS_LOG_PATH" ]; then
+        stat -c 'sync_progress_stat=%A %s %y %n' "$SYNC_PROGRESS_LOG_PATH" 2>/dev/null || true
+      fi
+    fi
     if [ -f "$TERMINAL_STOP_FILE" ]; then
       echo '--- terminal_stop_flag ---'
       cat "$TERMINAL_STOP_FILE"
@@ -285,4 +313,3 @@ classify_ob_failure() {
   fi
   echo transient
 }
-
