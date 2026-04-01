@@ -10,6 +10,7 @@ import {
   processRelayDecision,
 } from './operations.js';
 import { startLoopbackServer } from './server.js';
+import { processTelegramAllowlistCommand } from './telegram-allowlist.js';
 import { buildTotpProvisioning, writeTotpSecretFile } from './totp.js';
 
 async function main(): Promise<void> {
@@ -28,6 +29,8 @@ async function main(): Promise<void> {
       projectRoot: config.projectRoot,
       workspaceRoot: config.workspaceRoot,
       notesRoot: config.notesRoot,
+      picoclawConfigFile: config.picoclawConfigFile,
+      picoclawGatewayService: config.picoclawGatewayService,
       opsRoot: layout.opsRoot,
       listenHost: config.listenHost,
       listenPort: config.listenPort,
@@ -91,6 +94,23 @@ async function main(): Promise<void> {
       host: command.host,
       port: command.port,
     });
+    return;
+  }
+
+  if (command.name === 'telegram-allowlist') {
+    const outcome = await processTelegramAllowlistCommand(config, command);
+
+    logger.log('info', 'telegram allowlist processed', {
+      action: outcome.action,
+      configPath: outcome.configPath,
+      changed: outcome.changed,
+      gatewayRestarted: outcome.gatewayRestarted,
+      added: outcome.added,
+      removed: outcome.removed,
+      backupPath: outcome.backupPath,
+    });
+
+    process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
     return;
   }
 

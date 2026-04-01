@@ -32,6 +32,15 @@ export type CliCommand =
       name: 'decision';
       sender: string;
       text: string;
+    }
+  | {
+      name: 'telegram-allowlist';
+      action: 'show' | 'add' | 'remove' | 'replace';
+      entries: string[];
+      configPath?: string;
+      restartGateway: boolean;
+      dryRun: boolean;
+      allowEmpty: boolean;
     };
 
 const usage = [
@@ -43,6 +52,10 @@ const usage = [
   '  picoclaw-ops-companion intake --request <path|->',
   '  picoclaw-ops-companion execute --request-id <request-id>',
   '  picoclaw-ops-companion decision --sender <sender> --text "</approve ...>"',
+  '  picoclaw-ops-companion telegram-allowlist show [--config <path>]',
+  '  picoclaw-ops-companion telegram-allowlist add --entry <value> [--entry <value> ...] [--config <path>] [--dry-run] [--restart-gateway]',
+  '  picoclaw-ops-companion telegram-allowlist remove --entry <value> [--entry <value> ...] [--config <path>] [--dry-run] [--restart-gateway] [--allow-empty]',
+  '  picoclaw-ops-companion telegram-allowlist replace [--entry <value> ...] [--config <path>] [--allow-empty] [--dry-run] [--restart-gateway]',
 ].join('\n');
 
 export function parseCliArgs(argv: string[]): CliCommand {
@@ -144,6 +157,52 @@ export function parseCliArgs(argv: string[]): CliCommand {
     };
   }
 
+  if (command === 'telegram-allowlist') {
+    const [action, ...actionArgs] = rest;
+
+    if (
+      action !== 'show' &&
+      action !== 'add' &&
+      action !== 'remove' &&
+      action !== 'replace'
+    ) {
+      throw new Error(
+        `telegram-allowlist requires one of: show, add, remove, replace\n${usage}`,
+      );
+    }
+
+    const configPath = parseOptionalFlagValue(actionArgs, '--config');
+    const entries = collectFlagValues(actionArgs, '--entry');
+    const dryRun = actionArgs.includes('--dry-run');
+    const restartGateway = actionArgs.includes('--restart-gateway');
+    const allowEmpty = actionArgs.includes('--allow-empty');
+
+    if ((action === 'add' || action === 'remove') && entries.length === 0) {
+      throw new Error(`telegram-allowlist ${action} requires at least one --entry\n${usage}`);
+    }
+
+    if (action === 'replace' && entries.length === 0 && !allowEmpty) {
+      throw new Error(
+        'telegram-allowlist replace requires at least one --entry; pass --allow-empty to clear allow_from\n' +
+          usage,
+      );
+    }
+
+    if (action === 'show' && entries.length > 0) {
+      throw new Error(`telegram-allowlist show does not accept --entry\n${usage}`);
+    }
+
+    return {
+      name: 'telegram-allowlist',
+      action,
+      entries,
+      configPath,
+      restartGateway,
+      dryRun,
+      allowEmpty,
+    };
+  }
+
   throw new Error(`unknown command: ${command}\n${usage}`);
 }
 
@@ -159,4 +218,41 @@ function parsePort(value: string | undefined, flagName: string): number {
   }
 
   return parsed;
+}
+
+function parseOptionalFlagValue(argv: string[], flagName: string): string | undefined {
+  const flagIndex = argv.indexOf(flagName);
+
+  if (flagIndex === -1) {
+    return undefined;
+  }
+
+  const value = argv[flagIndex + 1];
+
+  if (value === undefined) {
+    throw new Error(`${flagName} requires a value\n${usage}`);
+  }
+
+  return value;
+}
+
+function collectFlagValues(argv: string[], flagName: string): string[] {
+  const values: string[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== flagName) {
+      continue;
+    }
+
+    const value = argv[index + 1];
+
+    if (value === undefined) {
+      throw new Error(`${flagName} requires a value\n${usage}`);
+    }
+
+    values.push(value);
+    index += 1;
+  }
+
+  return values;
 }

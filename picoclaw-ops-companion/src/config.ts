@@ -10,6 +10,8 @@ const envSchema = z.object({
   PICOCLAW_OPS_PROJECT_ROOT: z.string().optional(),
   PICOCLAW_WORKSPACE_ROOT: z.string().optional(),
   PICOCLAW_NOTES_ROOT: z.string().optional(),
+  PICOCLAW_CONFIG_FILE: z.string().optional(),
+  PICOCLAW_GATEWAY_SERVICE: z.string().default('picoclaw-gateway.service'),
   PICOCLAW_OPS_ROOT_NAME: z.string().default('ops-companion'),
   PICOCLAW_OPS_LISTEN_HOST: z.string().default('127.0.0.1'),
   PICOCLAW_OPS_LISTEN_PORT: z.coerce.number().int().min(1).max(65535).default(45450),
@@ -29,6 +31,8 @@ export type AppConfig = {
   projectRoot: string;
   workspaceRoot: string;
   notesRoot: string;
+  picoclawConfigFile: string;
+  picoclawGatewayService: string;
   opsRootName: string;
   listenHost: string;
   listenPort: number;
@@ -68,6 +72,10 @@ export function loadConfig(options: {
     notesRoot: resolve(
       env.PICOCLAW_NOTES_ROOT ?? join(homePath, '.picoclaw', 'workspace', 'notes'),
     ),
+    picoclawConfigFile: resolve(
+      env.PICOCLAW_CONFIG_FILE ?? join(homePath, '.picoclaw', 'config.json'),
+    ),
+    picoclawGatewayService: env.PICOCLAW_GATEWAY_SERVICE,
     opsRootName: env.PICOCLAW_OPS_ROOT_NAME,
     listenHost: env.PICOCLAW_OPS_LISTEN_HOST,
     listenPort: env.PICOCLAW_OPS_LISTEN_PORT,

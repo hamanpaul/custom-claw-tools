@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+DEFAULT_PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+DEFAULT_HOME_DIR="/home/haman"
+HOME_DIR="${HOME:-$DEFAULT_HOME_DIR}"
+PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
+NODE_BIN="${NODE_BIN:-$HOME_DIR/.nvm/versions/node/v22.20.0/bin/node}"
+
+if [ -z "${HOME:-}" ]; then
+  export HOME="$HOME_DIR"
+fi
+
+export PATH="$HOME_DIR/.local/bin:$HOME_DIR/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin"
+
+cd "$PROJECT_ROOT"
+
+if [ -f "$PROJECT_ROOT/dist/index.js" ]; then
+  exec "$NODE_BIN" "$PROJECT_ROOT/dist/index.js" telegram-allowlist "$@"
+fi
+
+TSX_BIN="${TSX_BIN:-$PROJECT_ROOT/node_modules/.bin/tsx}"
+
+if [ -e "$TSX_BIN" ]; then
+  exec "$TSX_BIN" "$PROJECT_ROOT/src/index.ts" telegram-allowlist "$@"
+fi
+
+printf 'ops-telegram-allowlist cannot start: missing dist/index.js and tsx fallback\n' >&2
+exit 1

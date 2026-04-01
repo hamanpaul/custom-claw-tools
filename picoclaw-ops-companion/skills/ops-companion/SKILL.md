@@ -1,6 +1,6 @@
 ---
 name: ops-companion
-description: "Route repo, research, and approval tasks through fixed ops helper commands on this PicoClaw host. Prefer `ops-notes-analysis`, `ops-workspace-analysis`, `ops-github-research`, `ops-repo-relay-push`, `ops-npm-install-package`, `ops-approve`, `ops-reject`, and `ops-request-status` over raw shell."
+description: "Route repo, research, approval, and Telegram allowlist tasks through fixed ops helper commands on this PicoClaw host. Prefer `ops-notes-analysis`, `ops-workspace-analysis`, `ops-github-research`, `ops-repo-relay-push`, `ops-npm-install-package`, `ops-approve`, `ops-reject`, `ops-request-status`, and `ops-telegram-allowlist` over raw shell."
 ---
 
 # Ops Companion Skill
@@ -25,6 +25,7 @@ Use `ops-companion` when the task:
 - asks for GitHub research through the companion bridge
 - asks to approve or reject an existing ops job
 - asks for request/job status from `ops-companion`
+- asks to inspect or update PicoClaw Telegram `allow_from`
 - needs audit artifacts or risk classification
 - needs high-risk approval with Telegram sender plus TOTP
 - crosses PicoClaw's normal workspace or policy boundary
@@ -44,6 +45,7 @@ If the user asks for:
 - `/approve <job-id> <totp>` -> use `ops-approve`
 - `/reject <job-id>` -> use `ops-reject`
 - status lookup -> use `ops-request-status`
+- Telegram allowlist management -> use `ops-telegram-allowlist`
 
 Only fall back to raw shell if the helper command cannot express the request.
 
@@ -87,7 +89,7 @@ Only fall back to raw shell if the helper command cannot express the request.
   - `mcp_opscompanion_reject_job`
   - `mcp_opscompanion_request_status`
   - `mcp_opscompanion_execute_request`
-- CLI: `bootstrap`, `listen`, `intake`, `decision`, `execute`, `totp`, `totp-gen`
+- CLI: `bootstrap`, `listen`, `intake`, `decision`, `execute`, `totp`, `totp-gen`, `telegram-allowlist`
 - relay wrapper: `bin/picoclaw-ops-relay`
 - helper wrappers:
   - `ops-notes-analysis`
@@ -98,6 +100,7 @@ Only fall back to raw shell if the helper command cannot express the request.
   - `ops-approve`
   - `ops-reject`
   - `ops-request-status`
+  - `ops-telegram-allowlist`
 - loopback listener: `GET /health`, `POST /intake`, `POST /decision`, `POST /execute`
 
 ### High-risk execute path today
@@ -171,6 +174,16 @@ ops-reject SENDER JOB_ID
 ```bash
 ops-request-status REQUEST_ID
 ```
+
+```bash
+ops-telegram-allowlist show
+ops-telegram-allowlist add --entry telegram:123456789 --restart-gateway
+ops-telegram-allowlist remove --entry telegram:123456789 --restart-gateway
+```
+
+- prefer `telegram:<user-id>` entries for new allowlist additions
+- use `--dry-run` before applying if you need a preview
+- use `--allow-empty` only when you intentionally want open access; removing the final entry also requires it
 
 Natural-language mapping examples:
 

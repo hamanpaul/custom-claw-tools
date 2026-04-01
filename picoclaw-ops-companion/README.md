@@ -93,6 +93,56 @@ picoclaw-ops-companion/
 npm run dev -- bootstrap
 ```
 
+### 管理 PicoClaw Telegram allowlist
+
+如果只是要調整 deb 安裝版 PicoClaw 的 Telegram `allow_from`，**不需要重編 PicoClaw**。  
+`picoclaw-ops-companion` 現在提供一個本機 operator helper，專門安全更新 `~/.picoclaw/config.json` 裡的 `channels.telegram.allow_from`：
+
+- 只會改 `channels.telegram.allow_from`
+- 寫入前會自動備份原始 config 到 `~/.picoclaw/backups/`
+- 可選擇一起重啟 `picoclaw-gateway.service`
+- 預設推薦 canonical 格式：`telegram:<user-id>`
+
+支援格式：
+
+- `telegram:<user-id>`（建議）
+- `<user-id>`（legacy 純數字 ID）
+- `@username`
+- `<user-id>|<username>`
+
+直接用 CLI：
+
+```bash
+npm run dev -- telegram-allowlist show
+npm run dev -- telegram-allowlist add --entry telegram:123456789 --restart-gateway
+npm run dev -- telegram-allowlist remove --entry telegram:123456789 --restart-gateway
+npm run dev -- telegram-allowlist replace \
+  --entry telegram:<PRIMARY_USER_ID> \
+  --entry telegram:123456789 \
+  --restart-gateway
+```
+
+也可以用 helper wrapper：
+
+```bash
+bin/ops-telegram-allowlist show
+bin/ops-telegram-allowlist add --entry telegram:123456789 --restart-gateway
+```
+
+常用旗標：
+
+- `--config <path>`：改其他 PicoClaw config 檔
+- `--dry-run`：只預覽，不落盤
+- `--allow-empty`：明確允許把 `allow_from` 清空（等於 open access，不建議）；`remove` 或 `replace` 若會清空 allowlist，都需要這個旗標
+
+如果你要拿第二個 Telegram 帳號做 allowlist 測試，建議流程：
+
+1. 先查出第二個帳號的 Telegram user ID
+2. 用 `telegram:<user-id>` 形式加到 allowlist
+3. 帶 `--restart-gateway` 重啟 PicoClaw gateway
+4. 用第二個帳號私訊 bot 驗證
+5. 測完再把第二個帳號移除
+
 ### Intake 結構化 request
 
 ```bash
@@ -187,6 +237,7 @@ helper wrappers 另外也已補齊：
 
 - `ops-repo-relay-push`
 - `ops-npm-install-package`
+- `ops-telegram-allowlist`
 
 目前已驗證的可用鏈路：
 
