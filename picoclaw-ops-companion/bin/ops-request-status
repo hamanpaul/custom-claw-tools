@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+DEFAULT_PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+DEFAULT_HOME_DIR="/home/haman"
+HOME_DIR="${HOME:-$DEFAULT_HOME_DIR}"
+PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
+RELAY_BIN="${RELAY_BIN:-$PROJECT_ROOT/bin/picoclaw-ops-relay}"
+
+if [ -z "${HOME:-}" ]; then
+  export HOME="$HOME_DIR"
+fi
+
+export PATH="$HOME_DIR/.local/bin:$HOME_DIR/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin"
+
+request_id="${1:-}"
+
+if [ -z "$request_id" ]; then
+  echo "Usage: ops-request-status REQUEST_ID" >&2
+  exit 2
+fi
+
+exec "$RELAY_BIN" status --request-id "$request_id"

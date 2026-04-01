@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+DEFAULT_PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+DEFAULT_HOME_DIR="/home/haman"
+HOME_DIR="${HOME:-$DEFAULT_HOME_DIR}"
+PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
+RELAY_BIN="${RELAY_BIN:-$PROJECT_ROOT/bin/picoclaw-ops-relay}"
+scope=""
+write_artifacts=0
+
+if [ -z "${HOME:-}" ]; then
+  export HOME="$HOME_DIR"
+fi
+
+export PATH="$HOME_DIR/.local/bin:$HOME_DIR/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --scope)
+      if [ $# -lt 2 ]; then
+        echo "missing value for --scope" >&2
+        exit 2
+      fi
+      scope="$2"
+      shift 2
+      ;;
+    --write-artifacts)
+      write_artifacts=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+sender="${1:-}"
+target_path="${2:-}"
+shift 2 || true
+prompt="${*:-}"
+
+if [ -z "$sender" ] || [ -z "$target_path" ] || [ -z "$prompt" ]; then
+  echo "Usage: ops-workspace-analysis [--scope notes|workspace|repo] [--write-artifacts] SENDER PATH PROMPT..." >&2
+  exit 2
+fi
+
+cmd=(
+  "$RELAY_BIN"
+  workspace-analysis
+  --sender "$sender"
+  --path "$target_path"
+  --prompt "$prompt"
+)
+
+if [ -n "$scope" ]; then
+  cmd+=(--scope "$scope")
+fi
+
+if [ "$write_artifacts" -eq 1 ]; then
+  cmd+=(--write-artifacts)
+fi
+
+exec "${cmd[@]}"

@@ -8,8 +8,8 @@ import { z } from 'zod';
 
 const envSchema = z.object({
   PICOCLAW_OPS_PROJECT_ROOT: z.string().optional(),
-  PICOCLAW_WORKSPACE_ROOT: z.string().default('/home/haman/.picoclaw/workspace'),
-  PICOCLAW_NOTES_ROOT: z.string().default('/home/haman/.picoclaw/workspace/notes'),
+  PICOCLAW_WORKSPACE_ROOT: z.string().optional(),
+  PICOCLAW_NOTES_ROOT: z.string().optional(),
   PICOCLAW_OPS_ROOT_NAME: z.string().default('ops-companion'),
   PICOCLAW_OPS_LISTEN_HOST: z.string().default('127.0.0.1'),
   PICOCLAW_OPS_LISTEN_PORT: z.coerce.number().int().min(1).max(65535).default(45450),
@@ -47,6 +47,7 @@ export function loadConfig(options: {
   skipTotpSecretResolution?: boolean;
 } = {}): AppConfig {
   const env = envSchema.parse(process.env);
+  const homePath = resolveHomeDir();
 
   if (env.PICOCLAW_COPILOT_CLI_PATH && env.PICOCLAW_COPILOT_CLI_URL) {
     throw new Error(
@@ -56,13 +57,17 @@ export function loadConfig(options: {
 
   const totpSecretFile = resolve(
     env.PICOCLAW_TOTP_SECRET_FILE ??
-      join(homedir(), '.config', 'picoclaw-ops-companion', 'totp.secret'),
+      join(homePath, '.config', 'picoclaw-ops-companion', 'totp.secret'),
   );
 
   return {
     projectRoot: resolve(env.PICOCLAW_OPS_PROJECT_ROOT ?? process.cwd()),
-    workspaceRoot: resolve(env.PICOCLAW_WORKSPACE_ROOT),
-    notesRoot: resolve(env.PICOCLAW_NOTES_ROOT),
+    workspaceRoot: resolve(
+      env.PICOCLAW_WORKSPACE_ROOT ?? join(homePath, '.picoclaw', 'workspace'),
+    ),
+    notesRoot: resolve(
+      env.PICOCLAW_NOTES_ROOT ?? join(homePath, '.picoclaw', 'workspace', 'notes'),
+    ),
     opsRootName: env.PICOCLAW_OPS_ROOT_NAME,
     listenHost: env.PICOCLAW_OPS_LISTEN_HOST,
     listenPort: env.PICOCLAW_OPS_LISTEN_PORT,
@@ -78,6 +83,18 @@ export function loadConfig(options: {
     totpIssuer: env.PICOCLAW_TOTP_ISSUER,
     totpAccountName: env.PICOCLAW_TOTP_ACCOUNT_NAME,
   };
+}
+
+function resolveHomeDir(): string {
+  const homePath = homedir().trim();
+
+  if (!homePath) {
+    throw new Error(
+      'unable to resolve home directory; set HOME or provide explicit PICOCLAW_* root paths',
+    );
+  }
+
+  return homePath;
 }
 
 function resolveInlineTotpSecret(env: z.infer<typeof envSchema>): string | undefined {

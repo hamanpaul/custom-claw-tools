@@ -69,6 +69,30 @@ const npmInstallPackageRequestSchema = requestEnvelopeSchema.extend({
     dev: z.boolean().default(false),
     global: z.boolean().default(false),
   }),
+}).superRefine((value, ctx) => {
+  if (value.scope === 'project' && value.payload.global) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'npm_install_package with project scope cannot set payload.global=true',
+      path: ['payload', 'global'],
+    });
+  }
+
+  if (value.scope === 'user' && !value.payload.global) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'npm_install_package with user scope requires payload.global=true',
+      path: ['payload', 'global'],
+    });
+  }
+
+  if (value.payload.global && value.payload.dev) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'npm_install_package cannot combine payload.global=true with payload.dev=true',
+      path: ['payload', 'dev'],
+    });
+  }
 });
 
 const workspaceAnalysisRequestSchema = requestEnvelopeSchema.extend({

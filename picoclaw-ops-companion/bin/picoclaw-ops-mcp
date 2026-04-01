@@ -8,24 +8,23 @@ DEFAULT_HOME_DIR="/home/haman"
 HOME_DIR="${HOME:-$DEFAULT_HOME_DIR}"
 PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
 NODE_BIN="${NODE_BIN:-$HOME_DIR/.nvm/versions/node/v22.20.0/bin/node}"
-HOST="${PICOCLAW_OPS_LISTEN_HOST:-127.0.0.1}"
-PORT="${PICOCLAW_OPS_LISTEN_PORT:-45450}"
 
 if [ -z "${HOME:-}" ]; then
   export HOME="$HOME_DIR"
 fi
+export PATH="$HOME_DIR/.local/bin:$HOME_DIR/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin"
 
 cd "$PROJECT_ROOT"
 
-if [ -f "$PROJECT_ROOT/dist/index.js" ]; then
-  exec "$NODE_BIN" "$PROJECT_ROOT/dist/index.js" listen --host "$HOST" --port "$PORT"
+if [ -f "$PROJECT_ROOT/dist/mcp-server.js" ]; then
+  exec "$NODE_BIN" "$PROJECT_ROOT/dist/mcp-server.js"
 fi
 
 TSX_BIN="${TSX_BIN:-$PROJECT_ROOT/node_modules/.bin/tsx}"
 
 if [ -e "$TSX_BIN" ]; then
-  exec "$TSX_BIN" "$PROJECT_ROOT/src/index.ts" listen --host "$HOST" --port "$PORT"
+  exec "$TSX_BIN" "$PROJECT_ROOT/src/mcp-server.ts"
 fi
 
-printf 'picoclaw-ops-companion listener cannot start: missing dist/index.js and tsx fallback\n' >&2
+printf 'picoclaw-ops-mcp cannot start: missing dist/mcp-server.js and tsx fallback\n' >&2
 exit 1

@@ -128,6 +128,123 @@ npm run dev -- listen --host 127.0.0.1 --port 45450
 - `POST /decision`
 - `POST /execute`
 
+### PicoClaw relay wrapper（Phase 1 bridge）
+
+如果要讓 live PicoClaw 直接走 companion，而不是手組 `curl`，可用 repo 內的 relay wrapper：
+
+```bash
+cd /home/haman/custom-claw-tools/picoclaw-ops-companion
+chmod +x bin/picoclaw-ops-relay
+```
+
+目前支援：
+
+- `health`
+- `status --request-id <request-id>`
+- `execute --request-id <request-id>`
+- `decision --sender <telegram:id> --text "</approve ...>" [--auto-execute]`
+- `intake-file --request-file <path> [--auto-execute]`
+- `intake-json --request-json <json> [--auto-execute]`
+- `workspace-analysis --sender <telegram:id> --path <path> --prompt <text> [--scope <notes|workspace|repo>] [--write-artifacts] [--request-id <request-id>] [--no-execute]`
+- `github-research --sender <telegram:id> --query <text> [--scope <repo|org|user|global>] [--repo <owner/name>] [--owner <owner>] [--mode <generic|issues|pull_requests|code|repositories>] [--limit <n>] [--request-id <request-id>] [--no-execute]`
+- `repo-relay-push --sender <telegram:id> --repo-path <path> [--remote <name>] [--branch <name>] [--revision <rev>] [--transport <relay|bundle>] [--request-id <request-id>] [--no-execute]`
+- `npm-install-package --sender <telegram:id> --project-path <path> --package <name> [--package <name> ...] [--scope <project|user>] [--dev] [--global] [--request-id <request-id>] [--no-execute]`
+
+範例：直接讓 companion 分析目前 notes tree（low risk，會自動 `intake -> execute`）：
+
+```bash
+bin/picoclaw-ops-relay workspace-analysis \
+  --sender telegram:<PRIMARY_USER_ID> \
+  --path /home/haman/.picoclaw/workspace/notes \
+  --prompt "Summarize the top-level notes layout for troubleshooting."
+```
+
+範例：直接走 GitHub research（low risk，會自動 `intake -> execute`）：
+
+```bash
+bin/picoclaw-ops-relay github-research \
+  --sender telegram:<PRIMARY_USER_ID> \
+  --repo hamanpaul/custom-claw-tools \
+  --query "recent obs-auto-moc and ops-companion related commits" \
+  --mode code
+```
+
+範例：relay `/approve` 指令，並在批准後自動接 `execute`：
+
+```bash
+bin/picoclaw-ops-relay decision \
+  --sender telegram:<PRIMARY_USER_ID> \
+  --text "/approve <job-id> 123456" \
+  --auto-execute
+```
+
+wrapper 會回傳：
+
+- 原始 `request` / `intake` / `decision` / `execute`
+- `status` summary（包含 request/result/approval/audit artifact paths）
+
+helper wrappers 另外也已補齊：
+
+- `ops-repo-relay-push`
+- `ops-npm-install-package`
+
+目前已驗證的可用鏈路：
+
+- `workspace_analysis`
+- `github_research`
+- `repo_relay_push`
+- `npm_install_package`
+
+其中：
+
+- `repo_relay_push`
+  - `transport=relay`：會真的執行 `git push`
+  - `transport=bundle`：會產出 `.bundle` artifact 供後續 relay / handoff
+- `npm_install_package`
+  - `scope=project`：可直接執行專案內 `npm install`
+  - `scope=project` 不可搭配 `--global`
+  - `scope=user` 必須搭配 `--global`，且仍需 approval，批准後才執行
+
+也就是說：
+
+- `--scope project --global` 是無效組合
+- `--scope user` 若沒帶 `--global` 也會被拒絕
+
+### PicoClaw MCP bridge
+
+pi3 live gateway 現在也可直接透過 MCP 連到 companion：
+
+- MCP server wrapper：`bin/picoclaw-ops-mcp`
+- PicoClaw 看到的工具名稱格式：`mcp_opscompanion_<tool>`
+
+目前 MCP 工具有：
+
+- `mcp_opscompanion_health`
+- `mcp_opscompanion_notes_analysis`
+- `mcp_opscompanion_workspace_analysis`
+- `mcp_opscompanion_github_research`
+- `mcp_opscompanion_repo_relay_push`
+- `mcp_opscompanion_npm_install_package`
+- `mcp_opscompanion_approve_job`
+- `mcp_opscompanion_reject_job`
+- `mcp_opscompanion_request_status`
+- `mcp_opscompanion_execute_request`
+
+live 驗證狀態：
+
+- pi3 gateway 已完成 `initialize -> tools/list`
+- 顯式 MCP smoke 已驗證 `health`
+- 自然語言 heartbeat smoke 已驗證會選到 `workspace_analysis`
+- high-risk request 現在也可直接透過 MCP 建立 approval job
+- pi3 直接 MCP smoke 已驗證 `repo_relay_push -> approve_job -> ready_for_execution`
+
+MCP server 目前同時支援：
+
+- PicoClaw stdio transport 使用的 ndjson framing
+- 傳統 `Content-Length` framing smoke 測試
+
+這個相容性很重要，因為 live PicoClaw stdio MCP client 實際上是走 newline-delimited JSON。
+
 最簡單的 health probe：
 
 ```bash
@@ -277,7 +394,10 @@ npm run dev -- decision --sender telegram:<PRIMARY_USER_ID> --text "/reject <job
 ```
 
 - `approve` 會優先讀 `~/.config/picoclaw-ops-companion/totp.secret`，也仍支援 `PAULCALW_SECRET` / `PICOCLAW_TOTP_SECRET`
-- 高風險 execution layer（如 `repo_relay_push` / 高權限 `npm_install_package`）仍在後續 Milestone 串接
+- 高風險 request 現在可透過 relay 或 MCP 建立 approval job
+- 高風險 execution layer 已實作：
+  - `repo_relay_push` 可執行 `relay` push 或產生 `bundle` artifact
+  - `npm_install_package` 可執行專案 scope install，user/global install 仍需 approval
 ### 低風險 execution（目前支援 `workspace_analysis` 與 `github_research`）
 
 ```bash
@@ -286,7 +406,7 @@ npm run dev -- execute --request-id <request-id>
 
 - `workspace_analysis` 仍走本地 deterministic wrapper
 - `github_research` 會建立受限的 GitHub Copilot SDK session，並只放行 companion 自訂的 read-only GitHub search tool
-- 其他 request type 會明確寫回 `not implemented`，不會假裝成功
+- 已支援的 request type 會寫出 result / artifact / audit；不支援的 request type 仍會明確回報失敗，不會假裝成功
 
 ## 部署與前置需求
 

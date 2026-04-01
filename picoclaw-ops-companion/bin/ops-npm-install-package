@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+DEFAULT_PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+DEFAULT_HOME_DIR="/home/haman"
+HOME_DIR="${HOME:-$DEFAULT_HOME_DIR}"
+PROJECT_ROOT="${PROJECT_ROOT:-$DEFAULT_PROJECT_ROOT}"
+RELAY_BIN="${RELAY_BIN:-$PROJECT_ROOT/bin/picoclaw-ops-relay}"
+scope=""
+dev=0
+global_install=0
+no_execute=0
+packages=()
+
+if [ -z "${HOME:-}" ]; then
+  export HOME="$HOME_DIR"
+fi
+
+export PATH="$HOME_DIR/.local/bin:$HOME_DIR/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --scope)
+      scope="${2:-}"
+      shift 2
+      ;;
+    --dev)
+      dev=1
+      shift
+      ;;
+    --global)
+      global_install=1
+      shift
+      ;;
+    --package)
+      packages+=("${2:-}")
+      shift 2
+      ;;
+    --no-execute)
+      no_execute=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+sender="${1:-}"
+project_path="${2:-}"
+
+if [ -z "$sender" ] || [ -z "$project_path" ] || [ "${#packages[@]}" -eq 0 ]; then
+  echo "Usage: ops-npm-install-package [--scope project|user] [--dev] [--global] --package NAME [--package NAME ...] [--no-execute] SENDER PROJECT_PATH" >&2
+  exit 2
+fi
+
+cmd=(
+  "$RELAY_BIN"
+  npm-install-package
+  --sender "$sender"
+  --project-path "$project_path"
+)
+
+if [ -n "$scope" ]; then
+  cmd+=(--scope "$scope")
+fi
+
+if [ "$dev" -eq 1 ]; then
+  cmd+=(--dev)
+fi
+
+if [ "$global_install" -eq 1 ]; then
+  cmd+=(--global)
+fi
+
+if [ "$no_execute" -eq 1 ]; then
+  cmd+=(--no-execute)
+fi
+
+for package in "${packages[@]}"; do
+  cmd+=(--package "$package")
+done
+
+exec "${cmd[@]}"
