@@ -105,6 +105,26 @@ ln -sf /home/haman/custom-claw-tools/health-tracker/bin/health-tracker-garmin \
   /home/haman/.picoclaw/workspace/bin/health-tracker-garmin
 ```
 
+If the pi3 runtime does not already have GarminDB installed, install it as the
+`haman` user. On minimal Debian / Armbian images, `python3 -m pip` may be
+missing, so bootstrap user-local pip first:
+
+```bash
+curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+python3 /tmp/get-pip.py --user --break-system-packages
+python3 -m pip install --user --break-system-packages garmindb
+rm -f /tmp/get-pip.py
+```
+
+If `garmindb_cli.py` is installed under `~/.local/bin`, point the runtime config
+at the explicit executable path:
+
+```json
+{
+  "garmindb_cli": "/home/haman/.local/bin/garmindb_cli.py"
+}
+```
+
 Expected pi3 runtime layout:
 
 - repo root: `/home/haman/custom-claw-tools/health-tracker`
@@ -112,3 +132,15 @@ Expected pi3 runtime layout:
 - runtime config: `/home/haman/.config/health-tracker/garmin-runtime.json`
 - GarminDB config: `/home/haman/.GarminDb/GarminConnectConfig.json`
 - canonical notes root: `/home/haman/.picoclaw/workspace/notes/claw/health`
+
+Populate the repo-external Garmin config before the first live sync. The
+GarminDB config must use `credentials.password_file`; do not put inline
+passwords into `GarminConnectConfig.json`.
+
+Once the repo-external Garmin config and password file exist, run:
+
+```bash
+/home/haman/.picoclaw/workspace/bin/health-tracker-garmin \
+  --runtime-config /home/haman/.config/health-tracker/garmin-runtime.json \
+  sync-and-ingest --latest
+```
