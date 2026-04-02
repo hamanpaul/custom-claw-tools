@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.runtime/
+local/
+garmin-runtime.local.json
+tests/.tmp/

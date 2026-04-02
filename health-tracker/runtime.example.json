@@ -1,0 +1,7 @@
+{
+  "garmin_config_path": "~/.GarminDb/GarminConnectConfig.json",
+  "garmindb_cli": "garmindb_cli.py",
+  "notes_root": "~/.picoclaw/workspace/notes/claw/health",
+  "templates_root": "~/.picoclaw/workspace/notes/claw/health/templates",
+  "lookback_days": 3
+}

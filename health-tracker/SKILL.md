@@ -18,6 +18,21 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 - reports root: `/home/haman/.picoclaw/workspace/notes/claw/health/reports`
 - live templates root: `/home/haman/.picoclaw/workspace/notes/claw/health/templates`
 - skill-local template mirror: `/home/haman/.picoclaw/workspace/skills/health-tracker/templates`
+- repo Garmin wrapper path: `/home/haman/custom-claw-tools/health-tracker/bin/health-tracker-garmin`
+- live Garmin wrapper path: `/home/haman/.picoclaw/workspace/bin/health-tracker-garmin`
+- Garmin runtime config path: `/home/haman/.config/health-tracker/garmin-runtime.json`
+
+## 固定寫入目標
+
+除非使用者明確指定檔名或要求整理 legacy 文件，`health-tracker` 的 routine output 只能落在以下 canonical targets：
+
+- raw capture：`notes/claw/health/raw/YYYY/MM/DD/<timestamp>-<record-type>-<source>.md`
+- daily log：`notes/claw/health/daily/YYYY-MM-DD.md`
+- monthly report：`notes/claw/health/reports/monthly/YYYY-MM.md`
+- quarterly report：`notes/claw/health/reports/quarterly/YYYY-QN.md`
+- yearly report：`notes/claw/health/reports/yearly/YYYY.md`
+
+不要為一般記錄任務新增 `notes/claw/health/*.md` top-level 檔案，也不要把 routine data 寫到 `diet.md`、`sleep.md`、`training.md`、`body_composition.md`、`DESIGN.md` 這類 legacy 檔案。這些 legacy 檔案只能當參考來源，不能當新的日常寫入目標。
 
 ## 何時使用這個 skill
 
@@ -38,6 +53,8 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 
 ## 資料來源規則
 
+- 若 GarminDB runtime 可用，優先使用 `health-tracker-garmin sync-and-ingest --latest` 或 `ingest-garmin` 將 Garmin Connect 資料匯入 canonical `raw/` 與 `daily/`
+- Garmin secrets 一律留在 repo 外的 `~/.GarminDb/GarminConnectConfig.json`，並使用 `credentials.password_file`
 - 若目前環境可用，優先使用 `gws-compatible health connector`
 - **不要**捏造像 `gws fit`、`gws health`、`gws sleep` 這種不存在的指令
 - 若 connector 不可用，依序退回：
@@ -111,7 +128,7 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 
 1. 先決定日期範圍
    - 若使用者有明確日期，就用該日期
-   - 若是即時餐點或運動紀錄，預設為今天
+   - 若是即時餐點或運動紀錄，預設使用這次 capture 的在地日期；若原始資料已帶時間戳，先用原始時間戳換算 `local_date`，不要每次重新猜日期
    - 若日期不明，摘要中要直接說明
 
 2. 先檢查模板
@@ -123,11 +140,15 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
    - 在做彙總前，先在 `raw/` 寫一筆原始紀錄
    - 保留原始文字、OCR 結果或 connector 輸出
    - 記錄來源、時間與信心
+   - `captured_at` 只生成或採信一次，格式固定為 ISO 8601 with offset，例如 `2026-04-02T11:35:19+08:00`
+   - raw 檔名中的 `<timestamp>` 必須由同一個 `captured_at` 正規化為 `YYYYMMDDTHHMMSSZZ`，例如 `20260402T113519+0800`
 
 4. 更新 daily record
    - 將該輸入合併到對應日期的 daily 檔
    - 只更新相關區塊
    - 不要用較弱的猜測覆蓋較強的證據
+   - 若 daily 檔已存在，只更新相關區塊與 `原始紀錄索引`，不要整份重寫
+   - 不要因為摘要方式改變就改寫既有欄位標題、區塊順序或檔名格式
 
 5. 只估算能支撐的內容
    - 有標示、表格或明確數字時，用精確值
@@ -145,6 +166,18 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
    - 列出最重要的計算值
    - 說明缺資料或低信心項目
    - 需要時附上檔案路徑
+
+## 穩定性規則
+
+- daily 檔名固定使用 `YYYY-MM-DD.md`；不要使用 `YYYYMMDD.md`、`today.md`、`latest.md` 或其他變體
+- monthly 檔名固定使用 `YYYY-MM.md`，月份必須補零
+- quarterly 檔名固定使用 `YYYY-QN.md`，`N` 只能是 `1`、`2`、`3`、`4`
+- yearly 檔名固定使用 `YYYY.md`
+- `local_date` 與 `date` 一律使用 `YYYY-MM-DD`
+- `weekday` 一律使用 `週一`、`週二`、`週三`、`週四`、`週五`、`週六`、`週日`
+- 同一筆事件先寫一次 raw capture，再把事實合併到對應 daily；不要因為補充整理就另外生出第二份 daily
+- 同一天的後續補充只更新既有 daily 檔；除非使用者明確要求，不要另開 summary、memo、scratch 或 top-level health 檔案
+- 若遇到 legacy 檔案與 canonical 檔案並存，新的事實一律寫入 canonical 檔案，legacy 檔案只保留為參考
 
 ## 模板檔案
 
@@ -183,6 +216,7 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 建議檔名格式：
 
 - `raw/YYYY/MM/DD/<timestamp>-<record-type>-<source>.md`
+- `<timestamp>` 一律使用由 `captured_at` 正規化後的 `YYYYMMDDTHHMMSSZZ`
 
 ## Daily record 規格
 
@@ -245,6 +279,7 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 建議檔名格式：
 
 - `daily/YYYY-MM-DD.md`
+- `date` 欄位與檔名必須一致，不可一個用 `2026-04-02`、另一個用 `20260402`
 
 ## 報表規格
 
@@ -265,6 +300,7 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 建議檔名格式：
 
 - `reports/monthly/YYYY-MM.md`
+- `MM` 必須補零，例如 `2026-04.md`
 
 ### Quarterly report
 
@@ -283,6 +319,7 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 建議檔名格式：
 
 - `reports/quarterly/YYYY-QN.md`
+- `Q1=01-03`、`Q2=04-06`、`Q3=07-09`、`Q4=10-12`
 
 ### Yearly report
 
