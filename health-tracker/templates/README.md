@@ -30,7 +30,7 @@ routine outputs 應固定落在以下路徑：
 
 一般記錄流程不要另外建立 `notes/claw/health/*.md` top-level 檔案。既有 top-level legacy 檔案只能當參考來源，不能當新的 routine 輸出目標。
 
-GarminDB integration 也必須遵守同一套 canonical 落點；Garmin 匯入只能更新既有 `raw/` 與 `daily/`，不能另建一棵平行的 `garmin/` 或 `health/` 匯入目錄。
+GarminDB integration 也必須遵守同一套 canonical 落點；Garmin 匯入必須先更新既有 `raw/` 與 `daily/`，若後續刷新報表也只能更新 canonical `reports/`，不能另建一棵平行的 `garmin/` 或 `health/` 匯入目錄。
 
 ## 變數解析規則
 

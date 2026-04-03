@@ -3,5 +3,13 @@
   "garmindb_cli": "garmindb_cli.py",
   "notes_root": "~/.picoclaw/workspace/notes/claw/health",
   "templates_root": "~/.picoclaw/workspace/notes/claw/health/templates",
-  "lookback_days": 3
+  "lookback_days": 3,
+  "notifications": {
+    "telegram": {
+      "enabled": true,
+      "chat_id": "telegram:<user-id>",
+      "fallback_to_picoclaw_config": true,
+      "bot_token_file": "~/.config/health-tracker/telegram-bot-token"
+    }
+  }
 }

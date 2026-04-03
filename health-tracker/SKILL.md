@@ -53,7 +53,7 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 
 ## 資料來源規則
 
-- 若 GarminDB runtime 可用，優先使用 `health-tracker-garmin sync-and-ingest --latest` 或 `ingest-garmin` 將 Garmin Connect 資料匯入 canonical `raw/` 與 `daily/`
+- 若 GarminDB runtime 可用，優先使用 `health-tracker-garmin sync-and-ingest --latest` 或 `ingest-garmin` 將 Garmin Connect 資料匯入 canonical `raw/`、`daily/`，並刷新受影響的 `reports/`
 - Garmin secrets 一律留在 repo 外的 `~/.GarminDb/GarminConnectConfig.json`，並使用 `credentials.password_file`
 - 若目前環境可用，優先使用 `gws-compatible health connector`
 - **不要**捏造像 `gws fit`、`gws health`、`gws sleep` 這種不存在的指令
@@ -123,6 +123,7 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
 - 產生日報、月報、季報、年報
 - 與前一期比較
 - 標出缺資料、低信心估值與趨勢變化
+- 報表更新後，若 runtime 已設定 Telegram 通知，發送本次更新摘要
 
 ## 必要流程
 
@@ -161,7 +162,12 @@ description: "追蹤活動、睡眠、飲食、訓練、用藥、檢驗與身體
    - quarterly: 較廣的趨勢與一致性
    - yearly: 高層級長期變化
 
-7. 回覆要精簡
+7. 報表更新後送出通知
+   - 若 runtime notification 已設定 Telegram，發送精簡摘要
+   - 只在報表實際變更時通知，避免重複打擾
+   - 摘要需說明更新了哪些報表與最重要的變化
+
+8. 回覆要精簡
    - 說明這次寫入了什麼
    - 列出最重要的計算值
    - 說明缺資料或低信心項目

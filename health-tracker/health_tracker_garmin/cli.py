@@ -16,7 +16,9 @@ from .config import (
 )
 from .garmin_reader import DailyGarminSnapshot, read_daily_snapshot
 from .garmin_sync import GarminSyncError, run_sync
+from .notifications import NotificationError, notify_report_update
 from .note_writer import GarminNoteWriter
+from .report_builder import ReportBuildResult, build_reports
 
 
 def _parse_date(value: str) -> date:
@@ -40,6 +42,45 @@ def _print_snapshot_results(results: list[tuple[DailyGarminSnapshot, Path, Path]
             f"{snapshot.day.isoformat()}: daily -> {daily_path} ; raw -> {raw_path}",
             file=sys.stdout,
         )
+
+
+def _print_report_results(result: ReportBuildResult) -> None:
+    if not result.updates:
+        print("reports: no changes", file=sys.stdout)
+        return
+    for update in result.updates:
+        print(
+            f"{update.label}: {update.report_type} -> {update.path}",
+            file=sys.stdout,
+        )
+        print(f"  summary: {update.summary_line}", file=sys.stdout)
+
+
+def _maybe_update_reports(
+    runtime_config_path: Path | None,
+    args: argparse.Namespace,
+    *,
+    target_days: list[date],
+) -> None:
+    if getattr(args, "no_reports", False) or not target_days:
+        return
+
+    runtime = load_runtime_config(
+        runtime_config_path,
+        require_garmin=False,
+        require_password_file=False,
+    )
+    report_result = build_reports(runtime, target_days=target_days, dry_run=args.dry_run)
+    _print_report_results(report_result)
+
+    if report_result.notification_message is None or getattr(args, "no_notify", False):
+        return
+    if args.dry_run:
+        print("Dry run notification:", file=sys.stdout)
+        print(report_result.notification_message, file=sys.stdout)
+        return
+    if notify_report_update(runtime, report_result.notification_message):
+        print("Sent Telegram report notification.", file=sys.stdout)
 
 
 def cmd_init_runtime(args: argparse.Namespace) -> int:
@@ -76,6 +117,7 @@ def _ingest(runtime_config_path: Path | None, args: argparse.Namespace) -> int:
     captured_at = _parse_captured_at(args.captured_at)
     writer = GarminNoteWriter(runtime)
     results: list[tuple[DailyGarminSnapshot, Path, Path]] = []
+    written_days: list[date] = []
     for target_day in _target_days(args.date, args.lookback_days or runtime.lookback_days):
         snapshot = read_daily_snapshot(runtime, target_day)
         if snapshot is None:
@@ -83,8 +125,10 @@ def _ingest(runtime_config_path: Path | None, args: argparse.Namespace) -> int:
             continue
         write_result = writer.write_snapshot(snapshot, captured_at=captured_at, dry_run=args.dry_run)
         results.append((snapshot, write_result.daily_path, write_result.raw_path))
+        written_days.append(snapshot.day)
     if results:
         _print_snapshot_results(results)
+    _maybe_update_reports(runtime_config_path, args, target_days=written_days)
     return 0
 
 
@@ -103,6 +147,26 @@ def cmd_sync_and_ingest(args: argparse.Namespace) -> int:
         print("Dry run sync:", shlex.join(command), file=sys.stdout)
     args.lookback_days = args.lookback_days or runtime.lookback_days
     return _ingest(args.runtime_config, args)
+
+
+def cmd_update_reports(args: argparse.Namespace) -> int:
+    runtime = load_runtime_config(
+        args.runtime_config,
+        require_garmin=False,
+        require_password_file=False,
+    )
+    target_days = _target_days(args.date, args.lookback_days or runtime.lookback_days)
+    report_result = build_reports(runtime, target_days=target_days, dry_run=args.dry_run)
+    _print_report_results(report_result)
+    if report_result.notification_message is None or args.no_notify:
+        return 0
+    if args.dry_run:
+        print("Dry run notification:", file=sys.stdout)
+        print(report_result.notification_message, file=sys.stdout)
+        return 0
+    if notify_report_update(runtime, report_result.notification_message):
+        print("Sent Telegram report notification.", file=sys.stdout)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -130,6 +194,8 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument("--lookback-days", type=int, default=None, help="How many days ending at --date to ingest.")
     ingest_parser.add_argument("--captured-at", type=str, default=None, help="Fixed ISO 8601 timestamp for deterministic raw filenames.")
     ingest_parser.add_argument("--dry-run", action="store_true", help="Compute paths without writing files.")
+    ingest_parser.add_argument("--no-reports", action="store_true", help="Skip monthly/quarterly/yearly report refresh.")
+    ingest_parser.add_argument("--no-notify", action="store_true", help="Do not send Telegram report notifications.")
     ingest_parser.set_defaults(func=cmd_ingest_garmin)
 
     sync_ingest_parser = subparsers.add_parser("sync-and-ingest", help="Run GarminDB sync, then ingest notes.")
@@ -138,7 +204,19 @@ def build_parser() -> argparse.ArgumentParser:
     sync_ingest_parser.add_argument("--lookback-days", type=int, default=None, help="How many days ending at --date to ingest.")
     sync_ingest_parser.add_argument("--captured-at", type=str, default=None, help="Fixed ISO 8601 timestamp for deterministic raw filenames.")
     sync_ingest_parser.add_argument("--dry-run", action="store_true", help="Print sync command and computed note paths without writing.")
+    sync_ingest_parser.add_argument("--no-reports", action="store_true", help="Skip monthly/quarterly/yearly report refresh.")
+    sync_ingest_parser.add_argument("--no-notify", action="store_true", help="Do not send Telegram report notifications.")
     sync_ingest_parser.set_defaults(func=cmd_sync_and_ingest)
+
+    report_parser = subparsers.add_parser(
+        "update-reports",
+        help="Rebuild monthly/quarterly/yearly reports from canonical daily notes.",
+    )
+    report_parser.add_argument("--date", type=_parse_date, default=None, help="End date to refresh, YYYY-MM-DD (default: today).")
+    report_parser.add_argument("--lookback-days", type=int, default=None, help="How many days ending at --date to consider for report refresh.")
+    report_parser.add_argument("--dry-run", action="store_true", help="Compute report updates and notification text without writing.")
+    report_parser.add_argument("--no-notify", action="store_true", help="Do not send Telegram report notifications.")
+    report_parser.set_defaults(func=cmd_update_reports)
 
     return parser
 
@@ -148,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (GarminSyncError, RuntimeConfigError) as exc:
+    except (GarminSyncError, NotificationError, RuntimeConfigError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 

@@ -17,6 +17,7 @@ DEFAULT_RUNTIME_CONFIG_PATH = Path.home() / ".config" / "health-tracker" / "garm
 DEFAULT_GARMIN_CONFIG_PATH = Path.home() / ".GarminDb" / "GarminConnectConfig.json"
 DEFAULT_NOTES_ROOT = Path.home() / ".picoclaw" / "workspace" / "notes" / "claw" / "health"
 DEFAULT_TEMPLATES_ROOT = DEFAULT_NOTES_ROOT / "templates"
+DEFAULT_PICOCLAW_CONFIG_PATH = Path.home() / ".picoclaw" / "config.json"
 DEFAULT_LOOKBACK_DAYS = 3
 
 
@@ -38,6 +39,22 @@ def _resolve_path(raw_value: str | None, base_dir: Path, default: Path) -> Path:
 
 def _resolve_command(raw_value: str | None) -> str:
     return raw_value or "garmindb_cli.py"
+
+
+def _optional_string(value: Any, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RuntimeConfigError(f"{label} must be a string.")
+    stripped = value.strip()
+    return stripped or None
+
+
+def _optional_path(value: Any, *, base_dir: Path, label: str) -> Path | None:
+    raw_value = _optional_string(value, label)
+    if raw_value is None:
+        return None
+    return _resolve_path(raw_value, base_dir, Path("."))
 
 
 @dataclass(frozen=True)
@@ -63,6 +80,7 @@ class RuntimeConfig:
     templates_root: Path
     repo_templates_root: Path
     lookback_days: int
+    notifications: "NotificationConfig"
 
     @property
     def raw_root(self) -> Path:
@@ -71,6 +89,30 @@ class RuntimeConfig:
     @property
     def daily_root(self) -> Path:
         return self.notes_root / "daily"
+
+    @property
+    def reports_root(self) -> Path:
+        return self.notes_root / "reports"
+
+
+@dataclass(frozen=True)
+class TelegramNotificationConfig:
+    """Repo-external Telegram notification settings."""
+
+    enabled: bool
+    chat_id: str | None
+    bot_token_file: Path | None
+    bot_token_env: str | None
+    api_base_url: str
+    picoclaw_config_path: Path
+    fallback_to_picoclaw_config: bool
+
+
+@dataclass(frozen=True)
+class NotificationConfig:
+    """Optional runtime notification settings."""
+
+    telegram: TelegramNotificationConfig | None
 
 
 def build_runtime_example() -> dict[str, Any]:
@@ -82,6 +124,14 @@ def build_runtime_example() -> dict[str, Any]:
         "notes_root": str(DEFAULT_NOTES_ROOT),
         "templates_root": str(DEFAULT_TEMPLATES_ROOT),
         "lookback_days": DEFAULT_LOOKBACK_DAYS,
+        "notifications": {
+            "telegram": {
+                "enabled": True,
+                "chat_id": "telegram:<user-id>",
+                "fallback_to_picoclaw_config": True,
+                "bot_token_file": "~/.config/health-tracker/telegram-bot-token",
+            }
+        },
     }
 
 
@@ -140,6 +190,62 @@ def _load_garmin_layout(config_path: Path, *, require_password_file: bool) -> Ga
     )
 
 
+def _load_notification_config(payload: dict[str, Any], *, base_dir: Path) -> NotificationConfig:
+    notifications_payload = payload.get("notifications")
+    if notifications_payload is None:
+        return NotificationConfig(telegram=None)
+    if not isinstance(notifications_payload, dict):
+        raise RuntimeConfigError("notifications must be a JSON object.")
+
+    telegram_payload = notifications_payload.get("telegram")
+    if telegram_payload is None:
+        return NotificationConfig(telegram=None)
+    if not isinstance(telegram_payload, dict):
+        raise RuntimeConfigError("notifications.telegram must be a JSON object.")
+
+    enabled = telegram_payload.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise RuntimeConfigError("notifications.telegram.enabled must be a boolean.")
+
+    fallback_to_picoclaw_config = telegram_payload.get("fallback_to_picoclaw_config", True)
+    if not isinstance(fallback_to_picoclaw_config, bool):
+        raise RuntimeConfigError(
+            "notifications.telegram.fallback_to_picoclaw_config must be a boolean."
+        )
+
+    api_base_url = _optional_string(
+        telegram_payload.get("api_base_url"),
+        "notifications.telegram.api_base_url",
+    ) or "https://api.telegram.org"
+    picoclaw_config_path = _optional_path(
+        telegram_payload.get("picoclaw_config_path"),
+        base_dir=base_dir,
+        label="notifications.telegram.picoclaw_config_path",
+    ) or DEFAULT_PICOCLAW_CONFIG_PATH
+
+    return NotificationConfig(
+        telegram=TelegramNotificationConfig(
+            enabled=enabled,
+            chat_id=_optional_string(
+                telegram_payload.get("chat_id"),
+                "notifications.telegram.chat_id",
+            ),
+            bot_token_file=_optional_path(
+                telegram_payload.get("bot_token_file"),
+                base_dir=base_dir,
+                label="notifications.telegram.bot_token_file",
+            ),
+            bot_token_env=_optional_string(
+                telegram_payload.get("bot_token_env"),
+                "notifications.telegram.bot_token_env",
+            ),
+            api_base_url=api_base_url.rstrip("/"),
+            picoclaw_config_path=picoclaw_config_path,
+            fallback_to_picoclaw_config=fallback_to_picoclaw_config,
+        )
+    )
+
+
 def load_runtime_config(
     runtime_config_path: Path | None = None,
     *,
@@ -177,4 +283,5 @@ def load_runtime_config(
         templates_root=templates_root,
         repo_templates_root=PROJECT_ROOT / "templates",
         lookback_days=lookback_days,
+        notifications=_load_notification_config(payload, base_dir=base_dir),
     )

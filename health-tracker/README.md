@@ -4,7 +4,8 @@
 
 - run GarminDB sync without committing secrets into the repo
 - ingest GarminDB SQLite outputs
-- write canonical `raw/` and `daily/` notes under `notes/claw/health`
+- write canonical `raw/`, `daily/`, and refreshed `reports/` notes under `notes/claw/health`
+- send a concise Telegram summary after report updates when runtime notification settings are configured
 
 ## Project layout
 
@@ -62,11 +63,18 @@ cd /home/paul_chen/prj_pri/custom-claw-tools/health-tracker
 ./bin/health-tracker-garmin --runtime-config ~/.config/health-tracker/garmin-runtime.json ingest-garmin
 ```
 
-Do both in one step:
+Do both in one step (this now also refreshes affected month / quarter / year reports):
 
 ```bash
 cd /home/paul_chen/prj_pri/custom-claw-tools/health-tracker
 ./bin/health-tracker-garmin --runtime-config ~/.config/health-tracker/garmin-runtime.json sync-and-ingest
+```
+
+Refresh reports from existing canonical daily notes without running Garmin sync:
+
+```bash
+cd /home/paul_chen/prj_pri/custom-claw-tools/health-tracker
+./bin/health-tracker-garmin --runtime-config ~/.config/health-tracker/garmin-runtime.json update-reports
 ```
 
 ## Current MVP mapping
@@ -77,8 +85,39 @@ The first implementation maps GarminDB into:
 - daily steps / distance（沿用 Garmin account measurement system）/ activity time / active calories
 - activity sessions as daily training summaries
 - raw Garmin import evidence into canonical `raw/YYYY/MM/DD/...`
+- month / quarter / year reports rebuilt from canonical `daily/YYYY-MM-DD.md`
 
 The first implementation does **not** yet promise stable support for Garmin high-level derived metrics such as readiness/recovery.
+
+## Telegram report notifications
+
+If `notifications.telegram` is configured in the repo-external runtime config,
+`ingest-garmin`, `sync-and-ingest`, and `update-reports` will send a concise
+Telegram summary **only when report files actually change**.
+
+Runtime example:
+
+```json
+{
+  "notifications": {
+    "telegram": {
+      "enabled": true,
+      "chat_id": "telegram:<user-id>",
+      "fallback_to_picoclaw_config": true,
+      "bot_token_file": "~/.config/health-tracker/telegram-bot-token"
+    }
+  }
+}
+```
+
+Notes:
+
+- Telegram secrets stay outside the repo.
+- If `bot_token_file` / `bot_token_env` is omitted, health-tracker will
+  attempt to reuse a supported token field from `~/.picoclaw/config.json`.
+- If `chat_id` is omitted, health-tracker will try to infer it from a single
+  `channels.telegram.allow_from` entry in `~/.picoclaw/config.json`.
+- Use `--no-notify` to suppress the Telegram message for a manual rerun.
 
 ## Validation
 

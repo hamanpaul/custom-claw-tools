@@ -5,4 +5,6 @@ __all__ = [
     "garmin_reader",
     "garmin_sync",
     "note_writer",
+    "notifications",
+    "report_builder",
 ]

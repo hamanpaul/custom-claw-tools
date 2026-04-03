@@ -245,6 +245,15 @@ class GarminIntegrationTest(unittest.TestCase):
             self.assertIn('"steps": 10234', raw_text)
             self.assertIn('"distance": 8.75', raw_text)
 
+            monthly_report = notes_root / "reports" / "monthly" / "2026-04.md"
+            quarterly_report = notes_root / "reports" / "quarterly" / "2026-Q2.md"
+            yearly_report = notes_root / "reports" / "yearly" / "2026.md"
+            self.assertTrue(monthly_report.exists())
+            self.assertTrue(quarterly_report.exists())
+            self.assertTrue(yearly_report.exists())
+            self.assertIn("平均步數", monthly_report.read_text(encoding="utf-8"))
+            self.assertIn("2026-04", monthly_report.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
