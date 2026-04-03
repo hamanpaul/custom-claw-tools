@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fami Claw Skill"
+  short_description: "Handle Famiclean 熱水器、瓦斯、水溫與剩餘瓦斯量 requests over LAN."
+  default_prompt: "Use $fami-claw-skill when the user asks about the Famiclean heater, 熱水器, 瓦斯, 水溫, or 剩餘瓦斯量. For 剩餘瓦斯量, read gas usage and report the remaining amount to the next 20-M3 threshold as 20 - (gas_total_m3 % 20)."
