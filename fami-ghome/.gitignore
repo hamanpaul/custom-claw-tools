@@ -1,0 +1,14 @@
+/config/.env
+/config/*.local.*
+/data/
+/logs/
+__pycache__/
+*.pyc
+*.sqlite3
+*.db
+*.pem
+*.key
+*.p12
+node_modules/
+dist/
+.npmrc
