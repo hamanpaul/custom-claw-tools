@@ -1,0 +1,18 @@
+[Unit]
+Description=fami-ghome cloud fulfillment service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/custom-claw-tools/fami-ghome
+Environment=HOME=%h
+EnvironmentFile=%h/custom-claw-tools/fami-ghome/config/.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/custom-claw-tools/fami-ghome/bin/fami-ghome serve
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

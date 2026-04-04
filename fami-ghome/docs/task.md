@@ -9,32 +9,32 @@
 
 ## 2. Config 與 secret handling
 
-- [ ] 建立 env loader，支援 `config/.env`
-- [ ] 建立 `data/` 與 `logs/` 的 runtime 建立邏輯
-- [ ] 定義 token store 格式與加密方式
-- [ ] 定義 session store 格式
-- [ ] 實作 `AUTH_ADMIN_PASSWORD_HASH` 驗證流程
-- [ ] 驗證 `ACCOUNT_LINKING_ALLOWED_REDIRECT_URIS`
+- [x] 建立 env loader，支援 `config/.env`
+- [x] 建立 `data/` 與 `logs/` 的 runtime 建立邏輯
+- [x] 定義 token store 格式與雜湊化持久化方式
+- [x] 定義 session store 格式
+- [x] 實作 `AUTH_ADMIN_PASSWORD_HASH` 驗證流程
+- [x] 驗證 `ACCOUNT_LINKING_ALLOWED_REDIRECT_URIS`
 
 ## 3. Famiclean adapter
 
-- [ ] 建立 `fami-ghome` 對 `famiclean-skill` wrapper 的 adapter
-- [ ] 支援 `read-temp`
-- [ ] 支援 `read-gas`
-- [ ] 支援 `set-temp`
-- [ ] 將 wrapper timeout、stderr、invalid JSON 轉成統一錯誤
+- [x] 建立 `fami-ghome` 對 `famiclean-skill` wrapper 的 adapter
+- [x] 支援 `read-temp`
+- [x] 支援 `read-gas`
+- [x] 支援 `set-temp`
+- [x] 將 wrapper timeout、stderr、invalid JSON 轉成統一錯誤
 
 ## 4. OAuth 與 cloud fulfillment
 
-- [ ] 實作 `GET /oauth/authorize`
-- [ ] 實作 `POST /oauth/token`
-- [ ] 實作 authorization code 產生與過期機制
-- [ ] 實作 access token / refresh token 產生、儲存、刷新
-- [ ] 實作 `POST /fulfillment`
-- [ ] 實作 `SYNC`
-- [ ] 實作 `QUERY`
-- [ ] 實作 `EXECUTE`
-- [ ] 將 `SetTemperature` 映射到 `famiclean-skill set-temp`
+- [x] 實作 `GET /oauth/authorize`
+- [x] 實作 `POST /oauth/token`
+- [x] 實作 authorization code 產生與過期機制
+- [x] 實作 access token / refresh token 產生、儲存、刷新
+- [x] 實作 `POST /fulfillment`
+- [x] 實作 `SYNC`
+- [x] 實作 `QUERY`
+- [x] 實作 `EXECUTE`
+- [x] 將 `SetTemperature` 映射到 `famiclean-skill set-temp`
 
 ## 5. Google Home 接入
 
@@ -55,15 +55,15 @@
 
 ## 7. 部署
 
-- [ ] 提供 Orangepi3 service 部署說明
+- [x] 提供 Orangepi3 service 部署說明
 - [ ] 定義 Picoclaw 如何呼叫 `fami-ghome` 的內部診斷 API 或延用 `famiclean-skill`
 - [ ] 新增 Dockerfile
 - [ ] 新增容器部署說明
-- [ ] 定義 HTTPS 暴露方式與 healthcheck
+- [x] 定義 healthcheck
 
 ## 8. 驗收
 
-- [ ] 本機 mock 測試通過
+- [x] 本機 mock 測試通過
 - [ ] 真實熱水器 `QUERY` 通過
 - [ ] 真實熱水器 `EXECUTE set temperature` 通過
 - [ ] Google Home app 操作通過

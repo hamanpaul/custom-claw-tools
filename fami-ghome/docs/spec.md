@@ -42,9 +42,10 @@
 #### Local path
 
 1. Google Home hub 先透過 cloud project 知道本地裝置 metadata
-2. Hub 在 LAN 內找到 `fami-ghome` local app
-3. Local app 仍呼叫 `famiclean-skill`
-4. 若 local path 失敗，系統可回退到 cloud path
+2. Hub 在 LAN 內載入 `Local Home SDK` app，並用 mDNS / UDP / UPnP 等 scan config 尋找可本地控制的裝置或 gateway
+3. Local app 透過 LAN 協定打到 Orangepi3 上的 `fami-ghome` local gateway / proxy
+4. gateway 再委派給本機 `famiclean-skill` wrapper
+5. 若 local path 失敗，系統可回退到 cloud path
 
 ## 3. Smart Home 模型
 
@@ -189,14 +190,22 @@ Google Smart Home 僅支援 `OAuth 2.0 authorization code flow`。
   - `PUBLIC_BASE_URL`
   - `TIMEZONE`
   - `LOG_LEVEL`
+  - `MIN_TEMP_CELSIUS`
   - `MAX_TEMP_CELSIUS`
 - Google / account linking 類：
   - `GOOGLE_CLOUD_PROJECT_ID`
   - `GOOGLE_HOME_PROJECT_ID`
   - `GOOGLE_HOME_FULFILLMENT_URL`
+  - `AGENT_USER_ID`
   - `ACCOUNT_LINKING_CLIENT_ID`
   - `ACCOUNT_LINKING_CLIENT_SECRET`
   - `ACCOUNT_LINKING_ALLOWED_REDIRECT_URIS`
+- 裝置 override 類（選填）：
+  - `DEVICE_IP`
+  - `DEVICE_MAC`
+  - `BROADCAST_IP`
+  - `FAMICLEAN_PORT`
+  - `FAMICLEAN_TIMEOUT_SECONDS`
 - 本地授權頁帳號：
   - `AUTH_ADMIN_USERNAME`
   - `AUTH_ADMIN_PASSWORD_HASH`
