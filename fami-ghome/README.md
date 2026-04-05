@@ -123,6 +123,7 @@ systemctl --user enable --now fami-ghome.service
 請先閱讀：
 
 - `docs/spec.md`
+- `docs/google-home-console-setup.md`
 - `docs/plan.md`
 - `docs/task.md`
 - `docs/todo.md`
