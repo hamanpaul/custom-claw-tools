@@ -86,6 +86,10 @@ description: "建立 review-first 的 Obsidian MOC manifest、proposal 與 previ
 - `refresh-destination-mocs`：直接重建 `TechVault` / `WorkVault` / `PersonalVault` 的 `MOC.md`
 - `dispatch-picoclaw-handoff --handoff <file>`：把 handoff job 直接交給 live PicoClaw，擷取結構化 report，再餵回 pipeline
 - `run-pipeline-once`：先吃 report inbox 裡的 PicoClaw 完成回報，再從 `root-note/` 產出下一個 handoff job；若 auto-dispatch 開啟，會立刻把 handoff 送進 live PicoClaw
+- 若 queued PicoClaw report 是壞的或無法套用，`run-pipeline-once` 會把它隔離到 `pipeline/picoclaw-report-failures/`，並讓受影響的 `root-note` 項目回到可重試狀態
+- 若 live PicoClaw auto-dispatch 自己回了壞 output 或沒回合法 report block，`run-pipeline-once` 也只會把受影響項目標成可重試，不會再整條卡死在 `handed_off_to_picoclaw`
+- 若 live PicoClaw 只回部分 entries，缺的 handoff 項目會自動補成 `failed` 後重試，不會再殘留成假性的 `handed_off_to_picoclaw`
+- 若 live PicoClaw 回了 stale job / 假的 processed output（目的筆記根本沒落地），dispatcher 會直接走本機 fallback，把 source root-note 複製到選定的 destination vault 後再回灌有效 report
 - `listen --host 127.0.0.1 --port 45460 --run-pipeline`：提供 loopback `GET /health` 與 `POST /picoclaw-report` callback ingestion
 - handoff artifact 的 `callback_contract.endpoint` 預設會指向 `http://127.0.0.1:45460/picoclaw-report`
 - handoff artifact 會附上 `vault_path` 與 destination root paths，讓 PicoClaw 在回報前先建立目的筆記
@@ -95,8 +99,8 @@ description: "建立 review-first 的 Obsidian MOC manifest、proposal 與 previ
 - Stage 2 agent 由 live PicoClaw 執行，不是在 `obs-auto-moc` 內執行
 - Stage 2 規則入口已對齊到 pi3 notes 內的 `ObsToolsVault/README.md`，更細的遷移規則在 `ObsToolsVault/specs/`
 - pi3 上已啟用 user-level `obs-auto-moc-listener.service` + `obs-auto-moc-pipeline.timer`
-- `bin/obs-auto-moc-runner` 預設會開 `OBS_AUTO_MOC_AUTO_DISPATCH=1`，並使用 `cron:obs-auto-moc` session 自動把 handoff 送進 PicoClaw
-- `bin/obs-auto-moc-listen` / `bin/obs-auto-moc-runner` 支援 `OBS_AUTO_MOC_SYNC_ROOT`、`OBS_AUTO_MOC_VAULT_PATH`、`OBS_AUTO_MOC_AUTO_DISPATCH`、`OBS_AUTO_MOC_PICOCLAW_SESSION` 等環境覆寫，可先對暫時 vault 做 smoke 再切回 live notes
+- `bin/obs-auto-moc-runner` 預設會開 `OBS_AUTO_MOC_AUTO_DISPATCH=1`，並使用 `cron:obs-auto-moc:<job_id>` 這種 job-scoped session 自動把 handoff 送進 PicoClaw，避免沿用舊對話上下文
+- `bin/obs-auto-moc-listen` / `bin/obs-auto-moc-runner` 支援 `OBS_AUTO_MOC_SYNC_ROOT`、`OBS_AUTO_MOC_VAULT_PATH`、`OBS_AUTO_MOC_AUTO_DISPATCH`、`OBS_AUTO_MOC_PICOCLAW_SESSION`、`OBS_AUTO_MOC_STALE_HANDOFF_SECONDS` 等環境覆寫；其中 `OBS_AUTO_MOC_PICOCLAW_SESSION` 會被當成 session prefix，dispatcher 會自動附上 `:<job_id>`，也可自行放 `{job_id}` placeholder
 
 ## 常用指令
 

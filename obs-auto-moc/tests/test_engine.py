@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 from obs_auto_moc.engine import (
     apply_picoclaw_report,
+    build_picoclaw_dispatch_prompt,
+    build_picoclaw_dispatch_session,
     build_workspace,
     dispatch_handoff_to_picoclaw,
     extract_json_block,
@@ -44,6 +46,35 @@ class ParseMarkdownTextTest(unittest.TestCase):
         parsed = parse_markdown_text("---\ntitle: [oops\n---\nbody\n")
         self.assertTrue(parsed.has_frontmatter)
         self.assertIsNotNone(parsed.parse_error)
+
+
+class BuildPicoclawDispatchPromptTest(unittest.TestCase):
+    def test_prompt_demands_real_json_block_not_placeholder(self) -> None:
+        prompt = build_picoclaw_dispatch_prompt(
+            handoff_payload={
+                "job_id": "root-note-20260331060000-feedface",
+                "entries": [],
+            },
+            callback_endpoint="http://127.0.0.1:43120/picoclaw/report",
+        )
+
+        self.assertIn("不要輸出 `{...json report...}`", prompt)
+        self.assertIn('PICOCLAW_REPORT_BEGIN\n{"job_id":"<job_id>"', prompt)
+        self.assertIn("每一個 entry 都必須在 report entries[] 中剛好出現一次", prompt)
+
+
+class BuildPicoclawDispatchSessionTest(unittest.TestCase):
+    def test_appends_job_id_by_default(self) -> None:
+        self.assertEqual(
+            build_picoclaw_dispatch_session("cron:obs-auto-moc", "root-note-20260331060000-feedface"),
+            "cron:obs-auto-moc:root-note-20260331060000-feedface",
+        )
+
+    def test_supports_job_id_placeholder(self) -> None:
+        self.assertEqual(
+            build_picoclaw_dispatch_session("cron:obs-auto-moc:{job_id}", "root-note-20260331060000-feedface"),
+            "cron:obs-auto-moc:root-note-20260331060000-feedface",
+        )
 
 
 class BuildWorkspaceTest(unittest.TestCase):
@@ -177,6 +208,10 @@ class RootNotePipelineTest(unittest.TestCase):
             self.assertEqual(second_result.handed_off_files, 0)
             self.assertEqual(second_result.unchanged_files, 1)
 
+            third_result = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T02:05:00+00:00")
+            self.assertEqual(third_result.handed_off_files, 1)
+            self.assertEqual(third_result.unchanged_files, 0)
+
     def test_apply_picoclaw_report_refreshes_only_touched_destination_mocs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -303,7 +338,7 @@ class RootNotePipelineTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "source_path must stay under root-note/"):
                 apply_picoclaw_report(report_path=report_path, sync_root=sync_root)
 
-    def test_apply_picoclaw_report_rejects_missing_destination_note(self) -> None:
+    def test_apply_picoclaw_report_marks_missing_destination_note_failed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             sync_root = root / "sync"
@@ -357,8 +392,14 @@ class RootNotePipelineTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(RuntimeError, "missing destination note"):
-                apply_picoclaw_report(report_path=report_path, sync_root=sync_root)
+            result = apply_picoclaw_report(report_path=report_path, sync_root=sync_root)
+
+            self.assertEqual(result.processed_count, 0)
+            self.assertEqual(result.failed_count, 1)
+            self.assertTrue(result.archived_report_path.exists())
+            state_payload = json.loads(result.state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state_payload["entries"]["root-note/entry.md"]["status"], "failed")
+            self.assertIn("missing destination note", state_payload["entries"]["root-note/entry.md"]["last_error"])
 
     def test_refresh_destination_mocs_updates_requested_destination_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -498,6 +539,44 @@ class RootNotePipelineTest(unittest.TestCase):
             handoff_payload = json.loads(Path(result.handoff_path).read_text(encoding="utf-8"))
             self.assertEqual(handoff_payload["entries"][0]["source_path"], "root-note/entry-two.md")
 
+    def test_run_pipeline_once_quarantines_invalid_report_and_retries_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            root_note_path = vault_path / "root-note"
+            config_dir.mkdir(parents=True)
+            root_note_path.mkdir(parents=True)
+            (vault_path / "TechVault").mkdir(parents=True)
+            (vault_path / "WorkVault").mkdir(parents=True)
+            (vault_path / "PersonalVault").mkdir(parents=True)
+            (config_dir / "config.json").write_text(json.dumps({"vaultPath": str(vault_path)}), encoding="utf-8")
+            (root_note_path / "entry.md").write_text("---\ntitle: Inbox\n---\nbody\n", encoding="utf-8")
+
+            first_monitor = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T00:00:00+00:00")
+            pipeline_root = vault_path / "claw" / "moc" / "pipeline"
+            report_inbox = pipeline_root / "picoclaw-report-inbox"
+            report_inbox.mkdir(parents=True, exist_ok=True)
+            bad_report_path = report_inbox / f"{first_monitor.job_id}.json"
+            bad_report_path.write_text("{not valid json\n", encoding="utf-8")
+
+            result = run_pipeline_once(sync_root=sync_root, generated_at="2026-03-31T00:20:00+00:00")
+
+            self.assertEqual(result.reports_discovered, 1)
+            self.assertEqual(result.reports_applied, 0)
+            self.assertEqual(result.reports_failed, 1)
+            self.assertFalse(bad_report_path.exists())
+            self.assertEqual(len(result.failed_report_paths), 1)
+            self.assertTrue(Path(result.failed_report_paths[0]).exists())
+            self.assertEqual(result.handed_off_files, 1)
+            self.assertIsNotNone(result.handoff_path)
+            self.assertTrue(Path(result.handoff_path).exists())
+
+            state_payload = json.loads(result.state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state_payload["entries"]["root-note/entry.md"]["status"], "handed_off_to_picoclaw")
+            self.assertNotEqual(state_payload["entries"]["root-note/entry.md"]["last_job_id"], first_monitor.job_id)
+
     def test_dispatch_handoff_to_picoclaw_runs_agent_and_queues_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -557,13 +636,183 @@ class RootNotePipelineTest(unittest.TestCase):
                     run_pipeline=True,
                 )
 
+            command = run.call_args[0][0]
+            session_value = command[command.index("--session") + 1]
             self.assertEqual(result.job_id, handoff.job_id)
+            self.assertEqual(session_value, f"cron:obs-auto-moc:{handoff.job_id}")
             self.assertTrue(result.raw_output_log_path.exists())
             self.assertTrue(result.report_copy_path.exists())
             self.assertFalse(result.queued_report_path.exists())
             self.assertIsNotNone(result.pipeline_result)
             self.assertEqual(result.pipeline_result["reports_applied"], 1)
             self.assertTrue((tech_path / "MOC.md").exists())
+
+    def test_dispatch_handoff_to_picoclaw_pads_missing_entries_as_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            root_note_path = vault_path / "root-note"
+            tech_path = vault_path / "TechVault"
+            config_dir.mkdir(parents=True)
+            root_note_path.mkdir(parents=True)
+            tech_path.mkdir(parents=True)
+            (vault_path / "WorkVault").mkdir(parents=True)
+            (vault_path / "PersonalVault").mkdir(parents=True)
+            (config_dir / "config.json").write_text(json.dumps({"vaultPath": str(vault_path)}), encoding="utf-8")
+            (root_note_path / "entry-a.md").write_text("---\ntitle: A\n---\nbody\n", encoding="utf-8")
+            (root_note_path / "entry-b.md").write_text("---\ntitle: B\n---\nbody\n", encoding="utf-8")
+            handoff = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T06:00:00+00:00")
+            handoff_payload = json.loads(handoff.handoff_path.read_text(encoding="utf-8"))
+            (tech_path / "atomic.md").write_text("---\ntitle: Atomic\n---\nbody\n", encoding="utf-8")
+
+            report_payload = {
+                "job_id": handoff.job_id,
+                "reported_by": "PicoClaw",
+                "completed_at": "2026-03-31T06:05:00+00:00",
+                "entries": [
+                    {
+                        "source_path": handoff_payload["entries"][0]["source_path"],
+                        "fingerprint": handoff_payload["entries"][0]["fingerprint"],
+                        "status": "processed",
+                        "outputs": [
+                            {
+                                "destination_vault": "TechVault",
+                                "note_path": "TechVault/atomic.md",
+                            }
+                        ],
+                    }
+                ],
+            }
+            agent_output = (
+                "PICOCLAW_REPORT_BEGIN\n"
+                + json.dumps(report_payload, ensure_ascii=False, indent=2)
+                + "\nPICOCLAW_REPORT_END\n"
+            )
+
+            with patch("obs_auto_moc.engine.subprocess.run") as run:
+                run.return_value = type(
+                    "CompletedProcess",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": agent_output,
+                        "stderr": "",
+                    },
+                )()
+                result = dispatch_handoff_to_picoclaw(
+                    handoff_path=handoff.handoff_path,
+                    sync_root=sync_root,
+                    run_pipeline=False,
+                )
+
+            queued_report = json.loads(result.queued_report_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(queued_report["entries"]), 2)
+            missing_entry = next(entry for entry in queued_report["entries"] if entry["source_path"] == "root-note/entry-b.md")
+            self.assertEqual(missing_entry["status"], "failed")
+            self.assertIn("missing from PicoClaw report", missing_entry["warnings"][0])
+
+    def test_dispatch_handoff_to_picoclaw_uses_local_fallback_for_stale_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            root_note_path = vault_path / "root-note"
+            tech_path = vault_path / "TechVault"
+            config_dir.mkdir(parents=True)
+            root_note_path.mkdir(parents=True)
+            tech_path.mkdir(parents=True)
+            (vault_path / "WorkVault").mkdir(parents=True)
+            (vault_path / "PersonalVault").mkdir(parents=True)
+            (config_dir / "config.json").write_text(json.dumps({"vaultPath": str(vault_path)}), encoding="utf-8")
+            (root_note_path / "entry-a.md").write_text("---\ntitle: A\n---\nbody a\n", encoding="utf-8")
+            (root_note_path / "entry-b.md").write_text("---\ntitle: B\n---\nbody b\n", encoding="utf-8")
+            handoff = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T06:00:00+00:00")
+
+            stale_report_payload = {
+                "job_id": "root-note-20260331055555-deadbeef",
+                "reported_by": "PicoClaw",
+                "completed_at": "2026-03-31T06:05:00+00:00",
+                "entries": [
+                    {
+                        "source_path": "root-note/entry-a.md",
+                        "fingerprint": "deadbeef",
+                        "status": "processed",
+                        "outputs": [
+                            {
+                                "destination_vault": "TechVault",
+                                "note_path": "TechVault/entry-a.md",
+                            }
+                        ],
+                    }
+                ],
+            }
+            agent_output = (
+                "PICOCLAW_REPORT_BEGIN\n"
+                + json.dumps(stale_report_payload, ensure_ascii=False, indent=2)
+                + "\nPICOCLAW_REPORT_END\n"
+            )
+
+            with patch("obs_auto_moc.engine.subprocess.run") as run:
+                run.return_value = type(
+                    "CompletedProcess",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": agent_output,
+                        "stderr": "",
+                    },
+                )()
+                result = dispatch_handoff_to_picoclaw(
+                    handoff_path=handoff.handoff_path,
+                    sync_root=sync_root,
+                    run_pipeline=False,
+                )
+
+            queued_report = json.loads(result.queued_report_path.read_text(encoding="utf-8"))
+            self.assertEqual(queued_report["job_id"], handoff.job_id)
+            self.assertEqual(queued_report["reported_by"], "obs-auto-moc-fallback")
+            self.assertEqual(len(queued_report["entries"]), 2)
+            self.assertTrue((tech_path / "entry-a.md").exists())
+            self.assertTrue((tech_path / "entry-b.md").exists())
+
+    def test_dispatch_handoff_to_picoclaw_surfaces_invalid_report_log_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            root_note_path = vault_path / "root-note"
+            config_dir.mkdir(parents=True)
+            root_note_path.mkdir(parents=True)
+            (vault_path / "TechVault").mkdir(parents=True)
+            (vault_path / "WorkVault").mkdir(parents=True)
+            (vault_path / "PersonalVault").mkdir(parents=True)
+            (config_dir / "config.json").write_text(json.dumps({"vaultPath": str(vault_path)}), encoding="utf-8")
+            (root_note_path / "entry.md").write_text("---\ntitle: Inbox\n---\nbody\n", encoding="utf-8")
+            handoff = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T06:00:00+00:00")
+
+            with patch("obs_auto_moc.engine.subprocess.run") as run:
+                run.return_value = type(
+                    "CompletedProcess",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": "not a valid PicoClaw report\n",
+                        "stderr": "",
+                    },
+                )()
+                with self.assertRaisesRegex(RuntimeError, rf"see .*{handoff.job_id}\.agent\.log"):
+                    dispatch_handoff_to_picoclaw(
+                        handoff_path=handoff.handoff_path,
+                        sync_root=sync_root,
+                        run_pipeline=True,
+                    )
+
+            dispatch_log_path = vault_path / "claw" / "moc" / "pipeline" / "picoclaw-dispatch" / f"{handoff.job_id}.agent.log"
+            self.assertTrue(dispatch_log_path.exists())
 
     def test_run_pipeline_once_auto_dispatches_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -606,8 +855,40 @@ class RootNotePipelineTest(unittest.TestCase):
             self.assertTrue(result.dispatch_enabled)
             self.assertEqual(result.dispatch_attempted, 1)
             self.assertEqual(result.dispatch_succeeded, 1)
+            self.assertEqual(result.dispatch_failed, 0)
             self.assertEqual(result.dispatched_job_ids, ["root-note-20260331062000-feedface"])
             self.assertEqual(result.reports_applied, 1)
+
+    def test_run_pipeline_once_marks_auto_dispatch_failure_retryable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            root_note_path = vault_path / "root-note"
+            config_dir.mkdir(parents=True)
+            root_note_path.mkdir(parents=True)
+            (vault_path / "TechVault").mkdir(parents=True)
+            (vault_path / "WorkVault").mkdir(parents=True)
+            (vault_path / "PersonalVault").mkdir(parents=True)
+            (config_dir / "config.json").write_text(json.dumps({"vaultPath": str(vault_path)}), encoding="utf-8")
+            (root_note_path / "entry.md").write_text("---\ntitle: Inbox\n---\nbody\n", encoding="utf-8")
+
+            with (
+                patch("obs_auto_moc.engine.env_flag", return_value=True),
+                patch("obs_auto_moc.engine.dispatch_handoff_to_picoclaw", side_effect=RuntimeError("bad dispatch")),
+            ):
+                result = run_pipeline_once(sync_root=sync_root, generated_at="2026-03-31T06:20:00+00:00")
+
+            self.assertTrue(result.dispatch_enabled)
+            self.assertEqual(result.dispatch_attempted, 1)
+            self.assertEqual(result.dispatch_succeeded, 0)
+            self.assertEqual(result.dispatch_failed, 1)
+
+            state_payload = json.loads(result.state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state_payload["entries"]["root-note/entry.md"]["status"], "failed")
+            self.assertEqual(state_payload["entries"]["root-note/entry.md"]["last_job_id"], result.handoff_job_id)
+            self.assertIn("bad dispatch", state_payload["entries"]["root-note/entry.md"]["last_error"])
 
     def test_queue_picoclaw_report_writes_validated_report_into_inbox(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

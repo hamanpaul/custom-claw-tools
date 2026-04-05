@@ -180,6 +180,10 @@ What exists now:
 - `refresh-destination-mocs` rebuilds script-maintained `MOC.md` files inside `TechVault`, `WorkVault`, and `PersonalVault`
 - `dispatch-picoclaw-handoff` submits a generated handoff job to live PicoClaw, captures the structured JSON report, and feeds it back into the pipeline
 - `run-pipeline-once` applies queued PicoClaw completion reports from the report inbox, emits the next handoff job from `root-note`, and when auto-dispatch is enabled, immediately submits that handoff to PicoClaw
+- if a queued PicoClaw completion report is malformed or cannot be applied, `run-pipeline-once` quarantines it under `pipeline/picoclaw-report-failures/` and lets the affected `root-note` entries become retryable on the next tick
+- if live PicoClaw auto-dispatch returns a non-zero exit or an unusable report block, `run-pipeline-once` marks the affected `root-note` entries as retryable instead of wedging the whole pipeline on `handed_off_to_picoclaw`
+- if live PicoClaw returns only a partial report, missing handoff entries are padded as `failed` results so they re-enter retry flow instead of lingering as stale `handed_off_to_picoclaw` state
+- if live PicoClaw returns a stale/wrong-job report or claims `processed` outputs that do not exist, `dispatch-picoclaw-handoff` falls back locally by copying the source root-note into the selected destination vault(s) and queueing a valid report for the pipeline
 - the handoff artifact now advertises `ObsToolsVault/README.md` as the Stage 2 ruleset source for PicoClaw
 - the handoff artifact also includes `vault_path` and per-destination root paths so PicoClaw can write destination notes before reporting completion
 - `listen` exposes a loopback-only callback listener on `127.0.0.1` for `GET /health` and `POST /picoclaw-report`
@@ -190,7 +194,7 @@ What is live now:
 - `obs-auto-moc-listener.service` keeps the loopback callback listener up on `127.0.0.1:45460`
 - `obs-auto-moc-pipeline.timer` periodically runs `bin/obs-auto-moc-runner`
 - `bin/obs-auto-moc-runner` defaults `OBS_AUTO_MOC_AUTO_DISPATCH=1` and dispatches new handoff jobs to `PicoClaw`
-- the live dispatch path uses `/usr/bin/picoclaw agent --session cron:obs-auto-moc`
+- the live dispatch path uses `/usr/bin/picoclaw agent --session cron:obs-auto-moc:<job_id>` so each handoff gets an isolated PicoClaw session instead of reusing stale conversation history
 
 ## pi3 loopback callback and runner deployment
 
@@ -233,6 +237,8 @@ For safe smoke tests on pi3, the wrappers also honor optional environment overri
 - `OBS_AUTO_MOC_RUN_PIPELINE`
 - `OBS_AUTO_MOC_AUTO_DISPATCH`
 - `OBS_AUTO_MOC_PICOCLAW_SESSION`
+- `OBS_AUTO_MOC_PICOCLAW_SESSION` acts as the session prefix/namespace; the dispatcher appends `:<job_id>` automatically, or you can include a literal `{job_id}` placeholder in the value for custom formatting
+- `OBS_AUTO_MOC_STALE_HANDOFF_SECONDS`
 
 That lets you point the listener/timer at a temporary vault before switching to the live notes tree.
 

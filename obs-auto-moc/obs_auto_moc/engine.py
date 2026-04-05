@@ -31,11 +31,57 @@ PICOCLAW_AUTO_DISPATCH_ENV = "OBS_AUTO_MOC_AUTO_DISPATCH"
 PICOCLAW_BIN_ENV = "OBS_AUTO_MOC_PICOCLAW_BIN"
 PICOCLAW_SESSION_ENV = "OBS_AUTO_MOC_PICOCLAW_SESSION"
 PICOCLAW_TIMEOUT_ENV = "OBS_AUTO_MOC_PICOCLAW_TIMEOUT_S"
+PICOCLAW_STALE_HANDOFF_ENV = "OBS_AUTO_MOC_STALE_HANDOFF_SECONDS"
 PICOCLAW_DEFAULT_BIN = "/usr/bin/picoclaw"
 PICOCLAW_DEFAULT_SESSION = "cron:obs-auto-moc"
 PICOCLAW_DEFAULT_TIMEOUT_S = 20 * 60
+PICOCLAW_DEFAULT_STALE_HANDOFF_S = 60 * 60
 PICOCLAW_REPORT_BEGIN = "PICOCLAW_REPORT_BEGIN"
 PICOCLAW_REPORT_END = "PICOCLAW_REPORT_END"
+WORK_VAULT_HINTS = (
+    "work",
+    "meeting",
+    "client",
+    "customer",
+    "company",
+    "business",
+    "career",
+    "project",
+    "proposal",
+    "sales",
+    "marketing",
+    "startup",
+    "工作",
+    "會議",
+    "客戶",
+    "公司",
+    "商務",
+    "專案",
+    "創業",
+)
+PERSONAL_VAULT_HINTS = (
+    "personal",
+    "family",
+    "home",
+    "health",
+    "sleep",
+    "diet",
+    "fitness",
+    "travel",
+    "journal",
+    "diary",
+    "private",
+    "finance",
+    "生活",
+    "家庭",
+    "健康",
+    "睡眠",
+    "飲食",
+    "旅遊",
+    "日記",
+    "私人",
+    "理財",
+)
 
 
 @dataclass
@@ -107,6 +153,7 @@ class RootNotePaths:
     handoff_root: Path
     report_inbox_root: Path
     completions_root: Path
+    failed_report_root: Path
     status_path: Path
 
 
@@ -230,7 +277,9 @@ class PipelineRunResult:
     report_inbox_root: Path
     reports_discovered: int
     reports_applied: int
+    reports_failed: int
     archived_report_paths: list[str]
+    failed_report_paths: list[str]
     handoff_job_id: str | None
     handoff_path: str | None
     handed_off_files: int
@@ -239,6 +288,7 @@ class PipelineRunResult:
     dispatch_enabled: bool = False
     dispatch_attempted: int = 0
     dispatch_succeeded: int = 0
+    dispatch_failed: int = 0
     dispatched_job_ids: list[str] = field(default_factory=list)
     dispatch_log_paths: list[str] = field(default_factory=list)
 
@@ -249,7 +299,9 @@ class PipelineRunResult:
             "report_inbox_root": str(self.report_inbox_root),
             "reports_discovered": self.reports_discovered,
             "reports_applied": self.reports_applied,
+            "reports_failed": self.reports_failed,
             "archived_report_paths": self.archived_report_paths,
+            "failed_report_paths": self.failed_report_paths,
             "handoff_job_id": self.handoff_job_id,
             "handoff_path": self.handoff_path,
             "handed_off_files": self.handed_off_files,
@@ -258,6 +310,7 @@ class PipelineRunResult:
             "dispatch_enabled": self.dispatch_enabled,
             "dispatch_attempted": self.dispatch_attempted,
             "dispatch_succeeded": self.dispatch_succeeded,
+            "dispatch_failed": self.dispatch_failed,
             "dispatched_job_ids": self.dispatched_job_ids,
             "dispatch_log_paths": self.dispatch_log_paths,
         }
@@ -313,6 +366,15 @@ class PicoclawDispatchResult:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def unique_preserving_order(values: list[str]) -> list[str]:
@@ -487,6 +549,7 @@ def resolve_root_note_paths(
         handoff_root=resolved_pipeline_root / "picoclaw-handoff",
         report_inbox_root=resolved_pipeline_root / "picoclaw-report-inbox",
         completions_root=resolved_pipeline_root / "picoclaw-completions",
+        failed_report_root=resolved_pipeline_root / "picoclaw-report-failures",
         status_path=resolved_pipeline_root / "last-pipeline-run.json",
     )
 
@@ -837,6 +900,13 @@ def env_flag(name: str, default: bool = False) -> bool:
     return value.strip().casefold() in {"1", "true", "yes", "on"}
 
 
+def stale_handoff_seconds() -> int:
+    value = os.environ.get(PICOCLAW_STALE_HANDOFF_ENV)
+    if value is None or not value.strip():
+        return PICOCLAW_DEFAULT_STALE_HANDOFF_S
+    return int(value)
+
+
 def extract_json_block(text: str, *, start_marker: str, end_marker: str) -> dict[str, Any]:
     start = text.find(start_marker)
     if start < 0:
@@ -868,9 +938,11 @@ def build_picoclaw_dispatch_prompt(*, handoff_payload: dict[str, Any], callback_
         "嚴格要求：\n"
         "1. 先閱讀 ruleset.source 指向的規則入口，必要時再補讀同 vault 下的 ObsToolsVault/specs。\n"
         "2. 對每個 processed entry，你必須先在 vault 內實際建立或更新 destination note，再回報結構化結果。\n"
-        "3. 只能輸出一個 JSON report block，前後標記必須完全如下：\n"
+        "3. 只能輸出一個 JSON report block，前後標記必須完全如下，且中間必須是真正可被 json.loads() 解析的 JSON object，"
+        "不要輸出 `{...json report...}`、Python dict、code fence 或其他 placeholder：\n"
         f"{PICOCLAW_REPORT_BEGIN}\n"
-        "{...json report...}\n"
+        '{"job_id":"<job_id>","reported_by":"PicoClaw","completed_at":"<ISO-8601>","entries":[{"source_path":"<root-note path>",'
+        '"fingerprint":"<sha256>","status":"processed","outputs":[{"destination_vault":"TechVault","note_path":"TechVault/example.md"}]}]}\n'
         f"{PICOCLAW_REPORT_END}\n"
         "4. 除了該 block 之外，不要輸出其他文字。\n"
         "5. JSON report 必須符合 callback_contract：\n"
@@ -878,14 +950,148 @@ def build_picoclaw_dispatch_prompt(*, handoff_payload: dict[str, Any], callback_
         "   - reported_by = PicoClaw\n"
         "   - completed_at\n"
         "   - entries[] with source_path, fingerprint, status, outputs\n"
-        "6. status 只能是 processed / skipped / failed。\n"
-        "7. processed entries 的 outputs[] 必須列出 destination_vault 與 note_path；note_path 要指向實際已存在的目的筆記。\n"
-        "8. 若 entry 不適合導入三個 destination vault，請回 skipped 並把 outputs 留空。\n"
-        "9. 你不需要自己 call HTTP callback；只要輸出結構化 JSON report block，由外層 bridge 送到 loopback callback。\n\n"
+        "6. handoff payload 裡的每一個 entry 都必須在 report entries[] 中剛好出現一次；不能只回部分 entries。\n"
+        "7. status 只能是 processed / skipped / failed。\n"
+        "8. 只有在 destination note 已經真的存在於 vault 時，才能回 processed；做不到就回 failed 或 skipped。\n"
+        "9. processed entries 的 outputs[] 必須列出 destination_vault 與 note_path；note_path 要指向實際已存在的目的筆記。\n"
+        "10. 若 entry 不適合導入三個 destination vault，請回 skipped 並把 outputs 留空。\n"
+        "11. 你不需要自己 call HTTP callback；只要輸出結構化 JSON report block，由外層 bridge 送到 loopback callback。\n\n"
         f"loopback callback endpoint: {callback_endpoint}\n\n"
         "handoff payload:\n"
         f"{handoff_json}\n"
     )
+
+
+def build_picoclaw_dispatch_session(base_session: str, job_id: str) -> str:
+    if "{job_id}" in base_session:
+        return base_session.replace("{job_id}", job_id)
+    return f"{base_session}:{job_id}"
+
+
+def fallback_destination_vaults(entry: dict[str, Any]) -> list[str]:
+    explicit_targets = [target for target in normalize_list(entry.get("moc_targets")) if target in DESTINATION_VAULTS]
+    if explicit_targets:
+        return unique_preserving_order(explicit_targets)
+
+    haystacks = [
+        normalize_scalar(entry.get("title")) or "",
+        normalize_scalar(entry.get("note_name")) or "",
+        normalize_scalar(entry.get("status")) or "",
+        normalize_scalar(entry.get("source_path")) or "",
+        " ".join(normalize_list(entry.get("tags"))),
+        " ".join(normalize_list(entry.get("aliases"))),
+        normalize_scalar(entry.get("source_text")) or "",
+    ]
+    search_text = " ".join(haystacks).casefold()
+    if any(keyword in search_text for keyword in PERSONAL_VAULT_HINTS):
+        return ["PersonalVault"]
+    if any(keyword in search_text for keyword in WORK_VAULT_HINTS):
+        return ["WorkVault"]
+    return ["TechVault"]
+
+
+def load_handoff_entry_source_text(entry: dict[str, Any], *, vault_path: Path) -> str:
+    source_text = normalize_scalar(entry.get("source_text"))
+    if source_text is not None:
+        return source_text
+    source_path = normalize_scalar(entry.get("source_path"))
+    if not source_path:
+        raise RuntimeError("handoff entry is missing source_path")
+    source_file = (vault_path / source_path).expanduser()
+    return source_file.read_text(encoding="utf-8")
+
+
+def should_use_local_fallback_report(
+    report_payload: dict[str, Any],
+    *,
+    handoff_payload: dict[str, Any],
+    vault_path: Path,
+) -> str | None:
+    job_id = normalize_scalar(handoff_payload.get("job_id"))
+    if report_payload.get("job_id") != job_id:
+        return f"report job_id {report_payload.get('job_id')!r} did not match handoff job_id {job_id!r}"
+
+    expected_entries = handoff_payload.get("entries")
+    if isinstance(expected_entries, list):
+        expected_pairs = {
+            (normalize_scalar(entry.get("source_path")), normalize_scalar(entry.get("fingerprint")))
+            for entry in expected_entries
+            if isinstance(entry, dict)
+        }
+        actual_pairs = {(entry["source_path"], entry["fingerprint"]) for entry in report_payload["entries"]}
+        if actual_pairs != expected_pairs:
+            return "report entries did not match handoff entries"
+
+    for entry in report_payload["entries"]:
+        if entry["status"] != "processed":
+            continue
+        for output in entry["outputs"]:
+            destination_note = resolve_destination_note_file(
+                vault_path,
+                output["destination_vault"],
+                output["note_path"],
+            )
+            if not destination_note.exists():
+                return f"processed report referenced missing destination note: {output['note_path']}"
+    return None
+
+
+def build_local_fallback_report(
+    handoff_payload: dict[str, Any],
+    *,
+    vault_path: Path,
+    fallback_reason: str,
+) -> dict[str, Any]:
+    job_id = normalize_scalar(handoff_payload.get("job_id"))
+    if not job_id:
+        raise RuntimeError("handoff payload must include job_id for local fallback")
+    raw_entries = handoff_payload.get("entries")
+    if not isinstance(raw_entries, list) or not raw_entries:
+        raise RuntimeError("handoff payload must include non-empty entries for local fallback")
+
+    completed_at = now_iso()
+    report_entries: list[dict[str, Any]] = []
+    for index, raw_entry in enumerate(raw_entries, start=1):
+        if not isinstance(raw_entry, dict):
+            raise RuntimeError(f"invalid handoff entry #{index} for local fallback")
+        source_path = normalize_scalar(raw_entry.get("source_path"))
+        fingerprint = normalize_scalar(raw_entry.get("fingerprint"))
+        if not source_path or not fingerprint:
+            raise RuntimeError(f"handoff entry #{index} is missing source_path or fingerprint for local fallback")
+
+        source_text = load_handoff_entry_source_text(raw_entry, vault_path=vault_path)
+        outputs: list[dict[str, Any]] = []
+        for destination_vault in fallback_destination_vaults(raw_entry):
+            note_path = f"{destination_vault}/{Path(source_path).name}"
+            destination_note = resolve_destination_note_file(vault_path, destination_vault, note_path)
+            if not destination_note.exists():
+                atomic_write(destination_note, source_text)
+            outputs.append(
+                {
+                    "destination_vault": destination_vault,
+                    "note_path": note_path,
+                    "title": normalize_scalar(raw_entry.get("title")),
+                    "tags": normalize_list(raw_entry.get("tags")),
+                    "warnings": [],
+                }
+            )
+
+        report_entries.append(
+            {
+                "source_path": source_path,
+                "fingerprint": fingerprint,
+                "status": "processed",
+                "warnings": [f"local fallback applied: {fallback_reason}"],
+                "outputs": outputs,
+            }
+        )
+
+    return {
+        "job_id": job_id,
+        "completed_at": completed_at,
+        "reported_by": "obs-auto-moc-fallback",
+        "entries": report_entries,
+    }
 
 
 def load_state_entries(path: Path) -> dict[str, dict[str, Any]]:
@@ -903,6 +1109,50 @@ def load_state_entries(path: Path) -> dict[str, dict[str, Any]]:
             raise RuntimeError(f"invalid root-note state entry: {path}: {source_path!r}")
         entries[source_path] = raw_entry
     return entries
+
+
+def mark_job_entries_failed_for_retry(
+    state_path: Path,
+    *,
+    job_id: str,
+    updated_at: str,
+    error: str,
+    report_path: Path,
+    report_entries: list[dict[str, Any]] | None = None,
+) -> None:
+    state_entries = load_state_entries(state_path)
+    targets = (
+        {
+            (entry["source_path"], entry["fingerprint"])
+            for entry in report_entries
+            if isinstance(entry, dict) and entry.get("source_path") and entry.get("fingerprint")
+        }
+        if report_entries is not None
+        else None
+    )
+
+    changed = False
+    for source_path, state_entry in state_entries.items():
+        if normalize_scalar(state_entry.get("last_job_id")) != job_id:
+            continue
+        fingerprint = normalize_scalar(state_entry.get("fingerprint"))
+        if not fingerprint:
+            continue
+        if targets is not None and (source_path, fingerprint) not in targets:
+            continue
+        state_entries[source_path] = {
+            "fingerprint": fingerprint,
+            "status": "failed",
+            "destinations": [],
+            "last_job_id": job_id,
+            "updated_at": updated_at,
+            "last_report_path": str(report_path),
+            "last_error": error,
+        }
+        changed = True
+
+    if changed:
+        write_json_file(state_path, {"entries": state_entries})
 
 
 def list_report_inbox_files(path: Path) -> list[Path]:
@@ -943,6 +1193,33 @@ def build_root_note_handoff_entry(path: Path, vault_path: Path) -> dict[str, Any
     }
 
 
+def should_skip_root_note_entry(
+    state_entry: dict[str, Any] | None,
+    *,
+    fingerprint: str,
+    generated_at: str,
+    pending_report_job_ids: set[str],
+) -> bool:
+    if state_entry is None or state_entry.get("fingerprint") != fingerprint:
+        return False
+
+    status = normalize_scalar(state_entry.get("status"))
+    if status in {"processed", "skipped"}:
+        return True
+    if status != "handed_off_to_picoclaw":
+        return False
+
+    last_job_id = normalize_scalar(state_entry.get("last_job_id"))
+    if last_job_id and last_job_id in pending_report_job_ids:
+        return True
+
+    updated_at = parse_iso_datetime(normalize_scalar(state_entry.get("updated_at")))
+    generated_dt = parse_iso_datetime(generated_at)
+    if updated_at is None or generated_dt is None:
+        return False
+    return (generated_dt - updated_at).total_seconds() < stale_handoff_seconds()
+
+
 def resolve_ruleset_source_paths(vault_path: Path) -> dict[str, str]:
     relative_path = PIPELINE_RULESET_SOURCE
     candidates = [
@@ -972,6 +1249,7 @@ def monitor_root_note(
     paths = resolve_paths(sync_root=sync_root, vault_path=vault_path, artifacts_root=artifacts_root, generated_at=generated)
     root_paths = resolve_root_note_paths(paths, root_note_path=root_note_path, pipeline_root=pipeline_root)
     state_entries = load_state_entries(root_paths.state_path)
+    pending_report_job_ids = {report_file.stem for report_file in list_report_inbox_files(root_paths.report_inbox_root)}
 
     scanned_files = 0
     unchanged_files = 0
@@ -981,10 +1259,11 @@ def monitor_root_note(
             scanned_files += 1
             entry = build_root_note_handoff_entry(path, paths.vault_path)
             state_entry = state_entries.get(entry["source_path"])
-            if (
-                state_entry is not None
-                and state_entry.get("fingerprint") == entry["fingerprint"]
-                and state_entry.get("status") in {"handed_off_to_picoclaw", "processed", "skipped"}
+            if should_skip_root_note_entry(
+                state_entry,
+                fingerprint=entry["fingerprint"],
+                generated_at=generated,
+                pending_report_job_ids=pending_report_job_ids,
             ):
                 unchanged_files += 1
                 continue
@@ -1077,7 +1356,12 @@ def resolve_destination_note_file(vault_path: Path, destination_vault: str, note
     return resolved
 
 
-def normalize_picoclaw_report_payload(payload: Any, *, source_label: str) -> dict[str, Any]:
+def normalize_picoclaw_report_payload(
+    payload: Any,
+    *,
+    source_label: str,
+    expected_entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError(f"invalid PicoClaw report payload: {source_label}")
 
@@ -1143,6 +1427,32 @@ def normalize_picoclaw_report_payload(payload: Any, *, source_label: str) -> dic
                 "outputs": outputs,
             }
         )
+
+    if expected_entries is not None:
+        expected_pairs: list[tuple[str, str]] = []
+        for index, raw_entry in enumerate(expected_entries, start=1):
+            if not isinstance(raw_entry, dict):
+                raise RuntimeError(f"invalid PicoClaw handoff entry #{index}: {source_label}")
+            source_path = normalize_scalar(raw_entry.get("source_path"))
+            fingerprint = normalize_scalar(raw_entry.get("fingerprint"))
+            if not source_path or not fingerprint:
+                raise RuntimeError(f"handoff entry #{index} is missing source_path or fingerprint: {source_label}")
+            validate_root_note_source_path(source_path)
+            expected_pairs.append((source_path, fingerprint))
+
+        present_pairs = {(entry["source_path"], entry["fingerprint"]) for entry in normalized_entries}
+        for source_path, fingerprint in expected_pairs:
+            if (source_path, fingerprint) in present_pairs:
+                continue
+            normalized_entries.append(
+                {
+                    "source_path": source_path,
+                    "fingerprint": fingerprint,
+                    "status": "failed",
+                    "warnings": [f"missing from PicoClaw report: {source_label}"],
+                    "outputs": [],
+                }
+            )
 
     return {
         "job_id": job_id,
@@ -1247,7 +1557,10 @@ def dispatch_handoff_to_picoclaw(
         picoclaw_bin or os.environ.get(PICOCLAW_BIN_ENV, PICOCLAW_DEFAULT_BIN),
         "agent",
         "--session",
-        picoclaw_session or os.environ.get(PICOCLAW_SESSION_ENV, PICOCLAW_DEFAULT_SESSION),
+        build_picoclaw_dispatch_session(
+            picoclaw_session or os.environ.get(PICOCLAW_SESSION_ENV, PICOCLAW_DEFAULT_SESSION),
+            job_id,
+        ),
         "--message",
         prompt,
     ]
@@ -1270,11 +1583,31 @@ def dispatch_handoff_to_picoclaw(
             f"PicoClaw agent dispatch failed for {job_id} with exit code {proc.returncode}; see {raw_output_log_path}"
         )
 
-    report_payload = extract_json_block(
-        combined_output,
-        start_marker=PICOCLAW_REPORT_BEGIN,
-        end_marker=PICOCLAW_REPORT_END,
-    )
+    try:
+        report_payload = normalize_picoclaw_report_payload(
+            extract_json_block(
+                combined_output,
+                start_marker=PICOCLAW_REPORT_BEGIN,
+                end_marker=PICOCLAW_REPORT_END,
+            ),
+            source_label=f"PicoClaw dispatch output for {job_id}",
+            expected_entries=handoff_payload.get("entries") if isinstance(handoff_payload.get("entries"), list) else None,
+        )
+        fallback_reason = should_use_local_fallback_report(
+            report_payload,
+            handoff_payload=handoff_payload,
+            vault_path=paths.vault_path,
+        )
+        if fallback_reason is not None:
+            report_payload = build_local_fallback_report(
+                handoff_payload,
+                vault_path=paths.vault_path,
+                fallback_reason=fallback_reason,
+            )
+    except Exception as exc:
+        raise RuntimeError(
+            f"PicoClaw agent returned unusable report for {job_id}; see {raw_output_log_path}: {exc}"
+        ) from exc
     write_json_file(report_copy_path, report_payload)
     queue_result = queue_picoclaw_report(
         report_payload=report_payload,
@@ -1341,7 +1674,6 @@ def apply_picoclaw_report(
     paths = resolve_paths(sync_root=sync_root, vault_path=vault_path, artifacts_root=artifacts_root, generated_at=report["completed_at"])
     root_paths = resolve_root_note_paths(paths, root_note_path=root_note_path, pipeline_root=pipeline_root)
     archived_report_path = root_paths.completions_root / f"{report['job_id']}.json"
-    write_json_file(archived_report_path, report)
 
     state_entries = load_state_entries(root_paths.state_path)
     processed_count = 0
@@ -1349,22 +1681,44 @@ def apply_picoclaw_report(
     failed_count = 0
     touched_destination_vaults: list[str] = []
     for entry in report["entries"]:
+        entry_error: str | None = None
         state_entry = state_entries.get(entry["source_path"])
         if state_entry is not None and state_entry.get("fingerprint") != entry["fingerprint"]:
-            raise RuntimeError(
-                f"fingerprint mismatch for {entry['source_path']}: state has {state_entry.get('fingerprint')}, report has {entry['fingerprint']}"
+            entry_error = (
+                f"fingerprint mismatch for {entry['source_path']}: "
+                f"state has {state_entry.get('fingerprint')}, report has {entry['fingerprint']}"
             )
+
+        destinations: list[str] = []
         for output in entry["outputs"]:
-            destination_note = resolve_destination_note_file(
-                paths.vault_path,
-                output["destination_vault"],
-                output["note_path"],
-            )
-            if not destination_note.exists():
-                raise RuntimeError(
-                    f"PicoClaw report references missing destination note: {output['note_path']}"
+            try:
+                destination_note = resolve_destination_note_file(
+                    paths.vault_path,
+                    output["destination_vault"],
+                    output["note_path"],
                 )
-        destinations = unique_preserving_order([output["destination_vault"] for output in entry["outputs"]])
+            except RuntimeError as exc:
+                entry_error = str(exc)
+                break
+            if not destination_note.exists():
+                entry_error = f"PicoClaw report references missing destination note: {output['note_path']}"
+                break
+            destinations.append(output["destination_vault"])
+
+        if entry_error is not None:
+            state_entries[entry["source_path"]] = {
+                "fingerprint": entry["fingerprint"],
+                "status": "failed",
+                "destinations": [],
+                "last_job_id": report["job_id"],
+                "updated_at": report["completed_at"],
+                "last_report_path": str(archived_report_path),
+                "last_error": entry_error,
+            }
+            failed_count += 1
+            continue
+
+        destinations = unique_preserving_order(destinations)
         touched_destination_vaults.extend(destinations)
         state_entries[entry["source_path"]] = {
             "fingerprint": entry["fingerprint"],
@@ -1374,6 +1728,8 @@ def apply_picoclaw_report(
             "updated_at": report["completed_at"],
             "last_report_path": str(archived_report_path),
         }
+        if entry["status"] == "failed" and entry.get("warnings"):
+            state_entries[entry["source_path"]]["last_error"] = "; ".join(normalize_list(entry["warnings"]))
         if entry["status"] == "processed":
             processed_count += 1
         elif entry["status"] == "skipped":
@@ -1381,6 +1737,7 @@ def apply_picoclaw_report(
         else:
             failed_count += 1
 
+    write_json_file(archived_report_path, report)
     write_json_file(root_paths.state_path, {"entries": state_entries})
     unique_destinations = unique_preserving_order(touched_destination_vaults)
     destination_result = (
@@ -1430,16 +1787,48 @@ def run_pipeline_once(
 
     reports_discovered = 0
     reports_applied = 0
+    reports_failed = 0
     archived_report_paths: list[str] = []
+    failed_report_paths: list[str] = []
     for report_file in list_report_inbox_files(root_paths.report_inbox_root):
         reports_discovered += 1
-        apply_result = apply_picoclaw_report(
-            report_path=report_file,
-            vault_path=paths.vault_path,
-            artifacts_root=paths.artifacts_root,
-            root_note_path=root_paths.root_note_path,
-            pipeline_root=root_paths.pipeline_root,
-        )
+        try:
+            apply_result = apply_picoclaw_report(
+                report_path=report_file,
+                vault_path=paths.vault_path,
+                artifacts_root=paths.artifacts_root,
+                root_note_path=root_paths.root_note_path,
+                pipeline_root=root_paths.pipeline_root,
+            )
+        except Exception as exc:
+            reports_failed += 1
+            failed_report_path = root_paths.failed_report_root / report_file.name
+            failed_report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_file.replace(failed_report_path)
+            failed_report_paths.append(str(failed_report_path))
+
+            job_id = report_file.stem
+            updated_at = generated
+            report_entries: list[dict[str, Any]] | None = None
+            try:
+                report = load_picoclaw_report(failed_report_path)
+            except Exception:
+                report = None
+            if report is not None:
+                job_id = report["job_id"]
+                updated_at = report["completed_at"]
+                report_entries = report["entries"]
+
+            mark_job_entries_failed_for_retry(
+                root_paths.state_path,
+                job_id=job_id,
+                updated_at=updated_at,
+                error=str(exc),
+                report_path=failed_report_path,
+                report_entries=report_entries,
+            )
+            continue
+
         archived_report_paths.append(str(apply_result.archived_report_path))
         reports_applied += 1
         report_file.unlink()
@@ -1453,6 +1842,7 @@ def run_pipeline_once(
     )
     dispatch_attempted = 0
     dispatch_succeeded = 0
+    dispatch_failed = 0
     dispatched_job_ids: list[str] = []
     dispatch_log_paths: list[str] = []
     handoff_path = monitor_result.handoff_path
@@ -1462,25 +1852,41 @@ def run_pipeline_once(
 
     if auto_dispatch and monitor_result.handoff_path is not None and monitor_result.job_id is not None:
         dispatch_attempted = 1
-        dispatch_result = dispatch_handoff_to_picoclaw(
-            handoff_path=monitor_result.handoff_path,
-            vault_path=paths.vault_path,
-            artifacts_root=paths.artifacts_root,
-            root_note_path=root_paths.root_note_path,
-            pipeline_root=root_paths.pipeline_root,
-            run_pipeline=True,
-        )
-        dispatch_succeeded = 1
-        dispatched_job_ids.append(dispatch_result.job_id)
-        dispatch_log_paths.append(str(dispatch_result.raw_output_log_path))
-        if dispatch_result.pipeline_result is not None:
-            reports_discovered += int(dispatch_result.pipeline_result.get("reports_discovered") or 0)
-            reports_applied += int(dispatch_result.pipeline_result.get("reports_applied") or 0)
-            archived_report_paths.extend(dispatch_result.pipeline_result.get("archived_report_paths") or [])
-            handoff_job_id = dispatch_result.pipeline_result.get("handoff_job_id")
-            handoff_path = dispatch_result.pipeline_result.get("handoff_path")
-            handed_off_files = int(dispatch_result.pipeline_result.get("handed_off_files") or 0)
-            unchanged_files = int(dispatch_result.pipeline_result.get("unchanged_files") or 0)
+        try:
+            dispatch_result = dispatch_handoff_to_picoclaw(
+                handoff_path=monitor_result.handoff_path,
+                vault_path=paths.vault_path,
+                artifacts_root=paths.artifacts_root,
+                root_note_path=root_paths.root_note_path,
+                pipeline_root=root_paths.pipeline_root,
+                run_pipeline=True,
+            )
+        except Exception as exc:
+            dispatch_failed = 1
+            dispatch_log_path = root_paths.pipeline_root / "picoclaw-dispatch" / f"{monitor_result.job_id}.agent.log"
+            if dispatch_log_path.exists():
+                dispatch_log_paths.append(str(dispatch_log_path))
+            mark_job_entries_failed_for_retry(
+                root_paths.state_path,
+                job_id=monitor_result.job_id,
+                updated_at=generated,
+                error=str(exc),
+                report_path=dispatch_log_path if dispatch_log_path.exists() else monitor_result.handoff_path,
+            )
+        else:
+            dispatch_succeeded = 1
+            dispatched_job_ids.append(dispatch_result.job_id)
+            dispatch_log_paths.append(str(dispatch_result.raw_output_log_path))
+            if dispatch_result.pipeline_result is not None:
+                reports_discovered += int(dispatch_result.pipeline_result.get("reports_discovered") or 0)
+                reports_applied += int(dispatch_result.pipeline_result.get("reports_applied") or 0)
+                reports_failed += int(dispatch_result.pipeline_result.get("reports_failed") or 0)
+                archived_report_paths.extend(dispatch_result.pipeline_result.get("archived_report_paths") or [])
+                failed_report_paths.extend(dispatch_result.pipeline_result.get("failed_report_paths") or [])
+                handoff_job_id = dispatch_result.pipeline_result.get("handoff_job_id")
+                handoff_path = dispatch_result.pipeline_result.get("handoff_path")
+                handed_off_files = int(dispatch_result.pipeline_result.get("handed_off_files") or 0)
+                unchanged_files = int(dispatch_result.pipeline_result.get("unchanged_files") or 0)
 
     result = PipelineRunResult(
         generated_at=generated,
@@ -1488,7 +1894,9 @@ def run_pipeline_once(
         report_inbox_root=root_paths.report_inbox_root,
         reports_discovered=reports_discovered,
         reports_applied=reports_applied,
+        reports_failed=reports_failed,
         archived_report_paths=archived_report_paths,
+        failed_report_paths=failed_report_paths,
         handoff_job_id=handoff_job_id,
         handoff_path=str(handoff_path) if isinstance(handoff_path, Path) else handoff_path,
         handed_off_files=handed_off_files,
@@ -1497,6 +1905,7 @@ def run_pipeline_once(
         dispatch_enabled=auto_dispatch,
         dispatch_attempted=dispatch_attempted,
         dispatch_succeeded=dispatch_succeeded,
+        dispatch_failed=dispatch_failed,
         dispatched_job_ids=dispatched_job_ids,
         dispatch_log_paths=dispatch_log_paths,
     )

@@ -198,6 +198,7 @@ def print_pipeline_run_summary(result: dict[str, object]) -> None:
     print(f"report_inbox_root: {result['report_inbox_root']}")
     print(f"reports_discovered: {result['reports_discovered']}")
     print(f"reports_applied: {result['reports_applied']}")
+    print(f"reports_failed: {result.get('reports_failed', 0)}")
     print(f"handoff_job_id: {result['handoff_job_id']}")
     print(f"handoff_path: {result['handoff_path']}")
     print(f"handed_off_files: {result['handed_off_files']}")
@@ -205,7 +206,12 @@ def print_pipeline_run_summary(result: dict[str, object]) -> None:
     print(f"dispatch_enabled: {str(result.get('dispatch_enabled', False)).lower()}")
     print(f"dispatch_attempted: {result.get('dispatch_attempted', 0)}")
     print(f"dispatch_succeeded: {result.get('dispatch_succeeded', 0)}")
+    print(f"dispatch_failed: {result.get('dispatch_failed', 0)}")
     print(f"state_path: {result['state_path']}")
+    for index, path in enumerate(result.get("failed_report_paths") or [], start=1):
+        print(f"failed_report_path[{index}]: {path}")
+    for index, path in enumerate(result.get("dispatch_log_paths") or [], start=1):
+        print(f"dispatch_log_path[{index}]: {path}")
 
 
 def print_dispatch_summary(result: dict[str, object]) -> None:
