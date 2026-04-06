@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from email.message import EmailMessage
+import json
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 import smtplib
@@ -24,6 +25,35 @@ def send_telegram(settings: FamicleanSettings, message: str) -> str:
     with urlopen(request, timeout=10) as response:
         payload = response.read().decode("utf-8", errors="replace")
     return payload
+
+
+def send_line(settings: FamicleanSettings, message: str) -> list[dict[str, str]]:
+    if not settings.line_channel_access_token or not settings.line_target_user_ids:
+        raise ValueError("LINE configuration is incomplete")
+
+    results: list[dict[str, str]] = []
+    for user_id in settings.line_target_user_ids:
+        body = json.dumps(
+            {
+                "to": user_id,
+                "messages": [{"type": "text", "text": message}],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        request = Request(
+            "https://api.line.me/v2/bot/message/push",
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {settings.line_channel_access_token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+        )
+        with urlopen(request, timeout=10) as response:
+            payload = response.read().decode("utf-8", errors="replace").strip()
+        results.append({"to": user_id, "response": payload or "sent"})
+
+    return results
 
 
 def send_email(settings: FamicleanSettings, subject: str, message: str) -> str:
@@ -59,6 +89,14 @@ def dispatch_notifications(settings: FamicleanSettings, subject: str, message: s
             sent_channels.append("telegram")
         except Exception as exc:
             failed_channels.append({"channel": "telegram", "error": str(exc)})
+
+    if settings.line_channel_access_token and settings.line_target_user_ids:
+        configured_channels.append("line")
+        try:
+            send_line(settings, message)
+            sent_channels.append("line")
+        except Exception as exc:
+            failed_channels.append({"channel": "line", "error": str(exc)})
 
     if settings.email_smtp_host and settings.email_from and _split_recipients(settings.email_to):
         configured_channels.append("email")

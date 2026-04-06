@@ -8,7 +8,7 @@ description: 處理 Famiclean 熱水器、瓦斯、水溫與剩餘瓦斯量相�
 ## Overview
 
 Use this skill to control a single Famiclean water heater over LAN from Orangepi3 or Picoclaw-style hosts.
-The bundled scripts cover device discovery, total gas queries, temperature reads, temperature changes, and the 08:00 daily threshold check with Telegram and Email notifications.
+The bundled scripts cover device discovery, total gas queries, temperature reads, temperature changes, and the 08:00 daily threshold check with Telegram, LINE, and Email notifications.
 For PicoClaw-triggered runs, prefer the skill-local `./fami-claw` wrapper so the agent can use stable command names and JSON output.
 
 ## Routing hints
@@ -113,7 +113,7 @@ python scripts/famiclean.py check-threshold
 - Loads `data/famiclean-state.json`
 - Reads current gas total
 - Calculates the current fixed 20-M3 threshold
-- Sends Telegram and Email alerts when a new threshold is crossed
+- Sends Telegram, LINE, and Email alerts when a new threshold is crossed
 
 ## Resources
 

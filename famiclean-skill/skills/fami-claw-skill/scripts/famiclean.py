@@ -158,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     set_temp.add_argument("temperature", type=int)
 
     check_threshold = subparsers.add_parser("check-threshold", help="Run the 08:00 threshold workflow")
-    check_threshold.add_argument("--no-notify", action="store_true", help="Do not send Telegram or Email")
+    check_threshold.add_argument("--no-notify", action="store_true", help="Do not send Telegram, LINE, or Email")
     check_threshold.add_argument("--force-notify", action="store_true", help="Send a notification even without a newly crossed threshold")
     return parser
 

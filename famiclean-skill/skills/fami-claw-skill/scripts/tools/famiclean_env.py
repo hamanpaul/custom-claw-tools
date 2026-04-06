@@ -22,6 +22,10 @@ class FamicleanSettings:
     max_temp_celsius: int = 50
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    line_channel_access_token: str | None = None
+    line_target_user_ids: tuple[str, ...] = ()
+    line_bot_user_id: str | None = None
+    line_bot_basic_id: str | None = None
     email_smtp_host: str | None = None
     email_smtp_port: int = 587
     email_smtp_username: str | None = None
@@ -68,6 +72,12 @@ def _as_float(value: str | None, default: float) -> float:
     if value is None or value == "":
         return default
     return float(value)
+
+
+def _as_csv_tuple(value: str | None) -> tuple[str, ...]:
+    if value is None or value == "":
+        return ()
+    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def _first_existing(candidates: list[Path]) -> Path | None:
@@ -128,6 +138,10 @@ def load_settings(script_path: Path, env_file: str | None = None, explicit_home:
         max_temp_celsius=_as_int(values.get("MAX_TEMP_CELSIUS"), 50),
         telegram_bot_token=values.get("TELEGRAM_BOT_TOKEN") or None,
         telegram_chat_id=values.get("TELEGRAM_CHAT_ID") or None,
+        line_channel_access_token=values.get("LINE_CHANNEL_ACCESS_TOKEN") or None,
+        line_target_user_ids=_as_csv_tuple(values.get("LINE_TARGET_USER_IDS")),
+        line_bot_user_id=values.get("LINE_BOT_USER_ID") or None,
+        line_bot_basic_id=values.get("LINE_BOT_BASIC_ID") or None,
         email_smtp_host=values.get("EMAIL_SMTP_HOST") or None,
         email_smtp_port=_as_int(values.get("EMAIL_SMTP_PORT"), 587),
         email_smtp_username=values.get("EMAIL_SMTP_USERNAME") or None,

@@ -39,8 +39,22 @@ Populate `config/.env` with at least:
 - `DEVICE_IP`
 - `DEVICE_MAC`
 - `BROADCAST_IP`
+- one notification channel
+
+For LINE push:
+
+- `LINE_CHANNEL_ACCESS_TOKEN`
+- `LINE_TARGET_USER_IDS` (comma-separated LINE user IDs)
+- `LINE_BOT_USER_ID` (optional metadata)
+- `LINE_BOT_BASIC_ID` (optional metadata)
+
+For Telegram:
+
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+
+For Email:
+
 - `EMAIL_SMTP_HOST`
 - `EMAIL_FROM`
 - `EMAIL_TO`

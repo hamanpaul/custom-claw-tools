@@ -182,6 +182,7 @@ PicoClaw wrapper contract：
 第一階段通知通道：
 
 - Telegram
+- LINE
 - Email
 
 若任一已配置通道失敗：
@@ -212,6 +213,10 @@ PicoClaw wrapper contract：
 - `STATE_FILE`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+- `LINE_CHANNEL_ACCESS_TOKEN`
+- `LINE_TARGET_USER_IDS`（comma-separated）
+- `LINE_BOT_USER_ID`
+- `LINE_BOT_BASIC_ID`
 - `EMAIL_SMTP_HOST`
 - `EMAIL_SMTP_PORT`
 - `EMAIL_SMTP_USERNAME`
