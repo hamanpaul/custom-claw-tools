@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
-from .engine import queue_picoclaw_report
+from .engine import record_agent_references, queue_picoclaw_report
 
 
 def serve_loopback(
@@ -34,26 +34,38 @@ def serve_loopback(
                     "port": port,
                     "run_pipeline": run_pipeline,
                     "callback_endpoint": "/picoclaw-report",
+                    "agent_reference_endpoint": "/agent-reference",
                 },
             )
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
-            if parsed.path != "/picoclaw-report":
+            if parsed.path not in {"/picoclaw-report", "/agent-reference"}:
                 self._write_json(404, {"error": f"unknown endpoint: {parsed.path}"})
                 return
 
             try:
                 payload = self._read_json()
-                result = queue_picoclaw_report(
-                    report_payload=payload,
-                    sync_root=sync_root,
-                    vault_path=vault_path,
-                    artifacts_root=artifacts_root,
-                    root_note_path=root_note_path,
-                    pipeline_root=pipeline_root,
-                    run_pipeline=run_pipeline,
-                )
+                if parsed.path == "/picoclaw-report":
+                    result = queue_picoclaw_report(
+                        report_payload=payload,
+                        sync_root=sync_root,
+                        vault_path=vault_path,
+                        artifacts_root=artifacts_root,
+                        root_note_path=root_note_path,
+                        pipeline_root=pipeline_root,
+                        run_pipeline=run_pipeline,
+                    )
+                else:
+                    if not isinstance(payload, dict):
+                        raise RuntimeError("agent reference payload must be a JSON object")
+                    result = record_agent_references(
+                        referenced_note_paths=payload.get("referenced_note_paths") or [],
+                        referenced_at=payload.get("referenced_at"),
+                        sync_root=sync_root,
+                        vault_path=vault_path,
+                        artifacts_root=artifacts_root,
+                    )
             except json.JSONDecodeError as error:
                 self._write_json(400, {"error": f"invalid JSON body: {error}"})
                 return

@@ -21,12 +21,14 @@ SUGGESTED_FIELDS = ("updated_at", "status", "moc_targets")
 UNTAGGED_LABEL = "_untagged"
 ROOT_NOTE_DIRNAME = "root-note"
 DESTINATION_VAULTS = ("TechVault", "WorkVault", "PersonalVault")
+ALLOWED_NOTE_TOP_LEVELS = (ROOT_NOTE_DIRNAME, *DESTINATION_VAULTS)
 PIPELINE_RULESET_NAME = "ObsToolsVault"
 PIPELINE_RULESET_SOURCE = "ObsToolsVault/README.md"
 REPORT_STATUSES = ("processed", "skipped", "failed")
 PIPELINE_CALLBACK_HOST = "127.0.0.1"
 PIPELINE_CALLBACK_PORT = 45460
 PIPELINE_CALLBACK_PATH = "/picoclaw-report"
+AGENT_REFERENCE_CALLBACK_PATH = "/agent-reference"
 PICOCLAW_AUTO_DISPATCH_ENV = "OBS_AUTO_MOC_AUTO_DISPATCH"
 PICOCLAW_BIN_ENV = "OBS_AUTO_MOC_PICOCLAW_BIN"
 PICOCLAW_SESSION_ENV = "OBS_AUTO_MOC_PICOCLAW_SESSION"
@@ -82,6 +84,8 @@ PERSONAL_VAULT_HINTS = (
     "私人",
     "理財",
 )
+DECAY_TAG_KEYS = ("decayed",)
+DECAY_STATUS = "decayed"
 
 
 @dataclass
@@ -104,7 +108,9 @@ class IndexedNote:
     moc_targets: list[str]
     status: str | None
     updated_at: str | None
+    last_resonated_at: str | None
     atomized_from: str | None
+    related: list[str]
     has_frontmatter: bool
     parse_error: str | None
     duplicate_frontmatter: bool
@@ -117,6 +123,7 @@ class IndexedNote:
     inbound_count: int = 0
     hub_score: int = 0
     is_orphan: bool = False
+    is_decayed: bool = False
 
     def display_groups(self) -> list[str]:
         groups = self.moc_targets or self.tags
@@ -254,6 +261,9 @@ class PicoclawReportApplyResult:
     failed_count: int
     touched_destination_vaults: list[str]
     destination_mocs: dict[str, str]
+    referenced_note_paths: list[str]
+    reactivated_note_paths: list[str]
+    relation_updated_note_paths: list[str]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -265,6 +275,29 @@ class PicoclawReportApplyResult:
             "processed_count": self.processed_count,
             "skipped_count": self.skipped_count,
             "failed_count": self.failed_count,
+            "touched_destination_vaults": self.touched_destination_vaults,
+            "destination_mocs": self.destination_mocs,
+            "referenced_note_paths": self.referenced_note_paths,
+            "reactivated_note_paths": self.reactivated_note_paths,
+            "relation_updated_note_paths": self.relation_updated_note_paths,
+        }
+
+
+@dataclass
+class AgentReferenceRecordResult:
+    referenced_at: str
+    referenced_note_paths: list[str]
+    reactivated_note_paths: list[str]
+    relation_updated_note_paths: list[str]
+    touched_destination_vaults: list[str]
+    destination_mocs: dict[str, str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "referenced_at": self.referenced_at,
+            "referenced_note_paths": self.referenced_note_paths,
+            "reactivated_note_paths": self.reactivated_note_paths,
+            "relation_updated_note_paths": self.relation_updated_note_paths,
             "touched_destination_vaults": self.touched_destination_vaults,
             "destination_mocs": self.destination_mocs,
         }
@@ -418,6 +451,69 @@ def normalize_list(value: Any) -> list[str]:
     return [normalize_scalar(value) or ""]
 
 
+def normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    cleaned = normalize_scalar(value)
+    if cleaned is None:
+        return False
+    return cleaned.casefold() in {"1", "true", "yes", "on"}
+
+
+def normalize_tag_key(tag: str) -> str:
+    return tag.strip().lstrip("#").casefold()
+
+
+def is_decayed_frontmatter(frontmatter: dict[str, Any]) -> bool:
+    if normalize_bool(frontmatter.get("decayed")):
+        return True
+    status = normalize_scalar(frontmatter.get("status"))
+    if status is not None and status.casefold() == DECAY_STATUS:
+        return True
+    return any(normalize_tag_key(tag) in DECAY_TAG_KEYS for tag in normalize_list(frontmatter.get("tags")))
+
+
+def remove_decayed_tags(tags: list[str]) -> list[str]:
+    return [tag for tag in tags if normalize_tag_key(tag) not in DECAY_TAG_KEYS]
+
+
+def validate_allowed_note_path(note_path: str) -> None:
+    note = Path(note_path)
+    if note.is_absolute() or ".." in note.parts or not note.parts:
+        raise RuntimeError(f"note path must stay under allowed vault roots: {note_path}")
+    if note.parts[0] not in ALLOWED_NOTE_TOP_LEVELS:
+        raise RuntimeError(
+            f"note path must stay under {', '.join(ALLOWED_NOTE_TOP_LEVELS)}: {note_path}"
+        )
+    if note.suffix.casefold() != ".md":
+        raise RuntimeError(f"note path must point to a markdown note: {note_path}")
+
+
+def resolve_allowed_note_file(vault_path: Path, note_path: str) -> Path:
+    validate_allowed_note_path(note_path)
+    resolved = (vault_path / note_path).resolve()
+    allowed_root = (vault_path / Path(note_path).parts[0]).resolve()
+    if resolved != allowed_root and allowed_root not in resolved.parents:
+        raise RuntimeError(f"note path escapes allowed vault root: {note_path}")
+    return resolved
+
+
+def normalize_related_links(value: Any) -> list[str]:
+    return unique_preserving_order(normalize_list(value))
+
+
+def note_reference_link(note_path: str) -> str:
+    validate_allowed_note_path(note_path)
+    relative = Path(note_path).with_suffix("").as_posix()
+    return f"[[{relative}]]"
+
+
+def render_markdown(frontmatter: dict[str, Any], body: str) -> str:
+    yaml_payload = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).strip()
+    body_text = body.lstrip("\n")
+    return f"---\n{yaml_payload}\n---\n{body_text}"
+
+
 def safe_heading(label: str) -> str:
     stripped = label.strip()
     while stripped.startswith("#"):
@@ -560,7 +656,7 @@ def load_json_file(path: Path) -> Any:
 
 def should_skip(path: Path, vault_path: Path, artifacts_root: Path, output_moc_path: Path) -> bool:
     relative = path.relative_to(vault_path)
-    if path == output_moc_path:
+    if path == output_moc_path or path.name == "MOC.md":
         return True
     if any(part == ".obsidian" for part in relative.parts):
         return True
@@ -576,6 +672,16 @@ def should_skip_destination_note(path: Path, destination_root: Path, output_moc_
     if any(part == ".obsidian" for part in relative.parts):
         return True
     return False
+
+
+def iter_allowed_note_files(vault_path: Path) -> list[Path]:
+    files: list[Path] = []
+    for top_level in ALLOWED_NOTE_TOP_LEVELS:
+        root = vault_path / top_level
+        if not root.exists():
+            continue
+        files.extend(sorted(path for path in root.rglob("*.md") if path.is_file()))
+    return files
 
 
 def index_note_file(path: Path, *, relative_to: Path, relative_prefix: str | None = None) -> IndexedNote:
@@ -594,7 +700,9 @@ def index_note_file(path: Path, *, relative_to: Path, relative_prefix: str | Non
     moc_targets = normalize_list(frontmatter.get("moc_targets") or frontmatter.get("moc-targets"))
     status = normalize_scalar(frontmatter.get("status"))
     updated_at = normalize_scalar(frontmatter.get("updated_at") or frontmatter.get("updated"))
+    last_resonated_at = normalize_scalar(frontmatter.get("last_resonated_at"))
     atomized_from = normalize_scalar(frontmatter.get("atomized_from"))
+    related = normalize_related_links(frontmatter.get("related"))
     missing_required_fields = [field for field in REQUIRED_FIELDS if field not in frontmatter]
     missing_suggested_fields = [field for field in SUGGESTED_FIELDS if field not in frontmatter]
     return IndexedNote(
@@ -607,22 +715,28 @@ def index_note_file(path: Path, *, relative_to: Path, relative_prefix: str | Non
         moc_targets=moc_targets,
         status=status,
         updated_at=updated_at,
+        last_resonated_at=last_resonated_at,
         atomized_from=atomized_from,
+        related=related,
         has_frontmatter=parsed.has_frontmatter,
         parse_error=parsed.parse_error,
         duplicate_frontmatter=parsed.duplicate_frontmatter,
         missing_required_fields=missing_required_fields,
         missing_suggested_fields=missing_suggested_fields,
         outbound_links=extract_wikilinks(parsed.body),
+        is_decayed=is_decayed_frontmatter(frontmatter),
     )
 
 
 def scan_notes(vault_path: Path, artifacts_root: Path, output_moc_path: Path) -> list[IndexedNote]:
     notes: list[IndexedNote] = []
-    for path in sorted(vault_path.rglob("*.md")):
+    for path in iter_allowed_note_files(vault_path):
         if should_skip(path, vault_path, artifacts_root, output_moc_path):
             continue
-        notes.append(index_note_file(path, relative_to=vault_path))
+        note = index_note_file(path, relative_to=vault_path)
+        if note.is_decayed:
+            continue
+        notes.append(note)
 
     resolve_links(notes)
     return notes
@@ -639,7 +753,10 @@ def scan_destination_notes(vault_path: Path, destination_vault: str) -> list[Ind
     for path in sorted(destination_root.rglob("*.md")):
         if should_skip_destination_note(path, destination_root, output_moc_path):
             continue
-        notes.append(index_note_file(path, relative_to=destination_root, relative_prefix=destination_vault))
+        note = index_note_file(path, relative_to=destination_root, relative_prefix=destination_vault)
+        if note.is_decayed:
+            continue
+        notes.append(note)
 
     resolve_links(notes)
     return notes
@@ -941,7 +1058,7 @@ def build_picoclaw_dispatch_prompt(*, handoff_payload: dict[str, Any], callback_
         "3. 只能輸出一個 JSON report block，前後標記必須完全如下，且中間必須是真正可被 json.loads() 解析的 JSON object，"
         "不要輸出 `{...json report...}`、Python dict、code fence 或其他 placeholder：\n"
         f"{PICOCLAW_REPORT_BEGIN}\n"
-        '{"job_id":"<job_id>","reported_by":"PicoClaw","completed_at":"<ISO-8601>","entries":[{"source_path":"<root-note path>",'
+        '{"job_id":"<job_id>","reported_by":"PicoClaw","completed_at":"<ISO-8601>","referenced_note_paths":["TechVault/example.md"],"entries":[{"source_path":"<root-note path>",'
         '"fingerprint":"<sha256>","status":"processed","outputs":[{"destination_vault":"TechVault","note_path":"TechVault/example.md"}]}]}\n'
         f"{PICOCLAW_REPORT_END}\n"
         "4. 除了該 block 之外，不要輸出其他文字。\n"
@@ -949,6 +1066,7 @@ def build_picoclaw_dispatch_prompt(*, handoff_payload: dict[str, Any], callback_
         "   - job_id\n"
         "   - reported_by = PicoClaw\n"
         "   - completed_at\n"
+        "   - referenced_note_paths[]：列出這次處理期間實際 search / read / 引用過、且位於 root-note / TechVault / WorkVault / PersonalVault 內的 markdown 筆記路徑\n"
         "   - entries[] with source_path, fingerprint, status, outputs\n"
         "6. handoff payload 裡的每一個 entry 都必須在 report entries[] 中剛好出現一次；不能只回部分 entries。\n"
         "7. status 只能是 processed / skipped / failed。\n"
@@ -1298,8 +1416,11 @@ def monitor_root_note(
                     "destination_vault",
                     "note_path",
                 ],
+                "optional_report_fields": [
+                    "referenced_note_paths",
+                ],
                 "endpoint": f"http://{PIPELINE_CALLBACK_HOST}:{PIPELINE_CALLBACK_PORT}{PIPELINE_CALLBACK_PATH}",
-                "note": "Processed entries should point to destination note files that PicoClaw already created or updated, then POST the structured report JSON to the loopback callback endpoint.",
+                "note": "Processed entries should point to destination note files that PicoClaw already created or updated; referenced_note_paths should list notes the agent actually searched/read/quoted inside the allowed vault scope.",
             },
         }
         write_json_file(handoff_path, handoff_payload)
@@ -1354,6 +1475,119 @@ def resolve_destination_note_file(vault_path: Path, destination_vault: str, note
     if destination_root not in resolved.parents and resolved != destination_root:
         raise RuntimeError(f"note_path escapes destination vault {destination_vault}: {note_path}")
     return resolved
+
+
+def infer_referenced_note_paths(entries: list[dict[str, Any]]) -> list[str]:
+    inferred: list[str] = []
+    for entry in entries:
+        source_path = normalize_scalar(entry.get("source_path"))
+        if source_path:
+            inferred.append(source_path)
+        for output in entry.get("outputs") or []:
+            if not isinstance(output, dict):
+                continue
+            note_path = normalize_scalar(output.get("note_path"))
+            if note_path:
+                inferred.append(note_path)
+    return unique_preserving_order(inferred)
+
+
+def touch_destination_vaults_for_note_paths(note_paths: list[str]) -> list[str]:
+    return unique_preserving_order(
+        [Path(note_path).parts[0] for note_path in note_paths if Path(note_path).parts and Path(note_path).parts[0] in DESTINATION_VAULTS]
+    )
+
+
+def apply_reference_update_to_note(
+    *,
+    note_path: str,
+    note_file: Path,
+    referenced_at: str,
+    batch_note_paths: list[str],
+) -> dict[str, bool]:
+    text = note_file.read_text(encoding="utf-8", errors="replace")
+    parsed = parse_markdown_text(text)
+    frontmatter = dict(parsed.frontmatter)
+    body = parsed.body if parsed.has_frontmatter else text
+    original_decayed = is_decayed_frontmatter(frontmatter)
+
+    existing_tags = normalize_list(frontmatter.get("tags"))
+    updated_tags = remove_decayed_tags(existing_tags)
+    if "tags" in frontmatter or updated_tags != existing_tags:
+        frontmatter["tags"] = updated_tags
+
+    if "decayed" in frontmatter or original_decayed:
+        frontmatter["decayed"] = False
+
+    status = normalize_scalar(frontmatter.get("status"))
+    if status is not None and status.casefold() == DECAY_STATUS:
+        frontmatter["status"] = "active"
+
+    frontmatter["last_resonated_at"] = referenced_at
+
+    existing_related = normalize_related_links(frontmatter.get("related"))
+    batch_related = [note_reference_link(peer_path) for peer_path in batch_note_paths if peer_path != note_path]
+    updated_related = unique_preserving_order(existing_related + batch_related)
+    if "related" in frontmatter or updated_related:
+        frontmatter["related"] = updated_related
+
+    rendered = render_markdown(frontmatter, body)
+    changed = rendered != text
+    if changed:
+        atomic_write(note_file, rendered)
+
+    return {
+        "changed": changed,
+        "reactivated": original_decayed and not is_decayed_frontmatter(frontmatter),
+        "relation_updated": updated_related != existing_related,
+    }
+
+
+def apply_agent_reference_batch(
+    *,
+    vault_path: Path,
+    referenced_note_paths: list[str],
+    referenced_at: str,
+) -> dict[str, list[str]]:
+    normalized_paths = unique_preserving_order(referenced_note_paths)
+    if not normalized_paths:
+        return {
+            "updated_note_paths": [],
+            "reactivated_note_paths": [],
+            "relation_updated_note_paths": [],
+        }
+
+    resolved_notes: list[tuple[str, Path]] = []
+    for note_path in normalized_paths:
+        if Path(note_path).parts[0] == ROOT_NOTE_DIRNAME:
+            continue
+        note_file = resolve_allowed_note_file(vault_path, note_path)
+        if not note_file.exists():
+            raise RuntimeError(f"referenced note does not exist: {note_path}")
+        resolved_notes.append((note_path, note_file))
+
+    updated_note_paths: list[str] = []
+    reactivated_note_paths: list[str] = []
+    relation_updated_note_paths: list[str] = []
+    for note_path, note_file in resolved_notes:
+        update = apply_reference_update_to_note(
+            note_path=note_path,
+            note_file=note_file,
+            referenced_at=referenced_at,
+            batch_note_paths=normalized_paths,
+        )
+        if update["changed"]:
+            updated_note_paths.append(note_path)
+        if update["reactivated"]:
+            reactivated_note_paths.append(note_path)
+        if update["relation_updated"]:
+            relation_updated_note_paths.append(note_path)
+
+    return {
+        "updated_note_paths": updated_note_paths,
+        "reactivated_note_paths": reactivated_note_paths,
+        "relation_updated_note_paths": relation_updated_note_paths,
+    }
 
 
 def normalize_picoclaw_report_payload(
@@ -1454,16 +1688,66 @@ def normalize_picoclaw_report_payload(
                 }
             )
 
+    explicit_references = unique_preserving_order(normalize_list(payload.get("referenced_note_paths")))
+    for note_path in explicit_references:
+        validate_allowed_note_path(note_path)
+
     return {
         "job_id": job_id,
         "completed_at": completed_at,
         "reported_by": reported_by,
         "entries": normalized_entries,
+        "referenced_note_paths": explicit_references,
     }
 
 
 def load_picoclaw_report(report_path: Path) -> dict[str, Any]:
     return normalize_picoclaw_report_payload(load_json_file(report_path), source_label=str(report_path))
+
+
+def record_agent_references(
+    *,
+    referenced_note_paths: list[str],
+    referenced_at: str | None = None,
+    sync_root: Path | None = None,
+    vault_path: Path | None = None,
+    artifacts_root: Path | None = None,
+) -> AgentReferenceRecordResult:
+    normalized_paths = unique_preserving_order(referenced_note_paths)
+    if not normalized_paths:
+        raise RuntimeError("referenced_note_paths must not be empty")
+
+    effective_at = referenced_at or now_iso()
+    paths = resolve_paths(sync_root=sync_root, vault_path=vault_path, artifacts_root=artifacts_root, generated_at=effective_at)
+    update = apply_agent_reference_batch(
+        vault_path=paths.vault_path,
+        referenced_note_paths=normalized_paths,
+        referenced_at=effective_at,
+    )
+    touched_destination_vaults = touch_destination_vaults_for_note_paths(update["updated_note_paths"])
+    destination_result = (
+        refresh_destination_mocs(
+            vault_path=paths.vault_path,
+            artifacts_root=paths.artifacts_root,
+            destination_vaults=touched_destination_vaults,
+            generated_at=effective_at,
+        )
+        if touched_destination_vaults
+        else DestinationMocRefreshResult(
+            generated_at=effective_at,
+            vault_path=paths.vault_path,
+            destination_mocs={},
+            note_counts={},
+        )
+    )
+    return AgentReferenceRecordResult(
+        referenced_at=effective_at,
+        referenced_note_paths=normalized_paths,
+        reactivated_note_paths=update["reactivated_note_paths"],
+        relation_updated_note_paths=update["relation_updated_note_paths"],
+        touched_destination_vaults=touched_destination_vaults,
+        destination_mocs=destination_result.destination_mocs,
+    )
 
 
 def queue_picoclaw_report(
@@ -1739,6 +2023,12 @@ def apply_picoclaw_report(
 
     write_json_file(archived_report_path, report)
     write_json_file(root_paths.state_path, {"entries": state_entries})
+    reference_update = apply_agent_reference_batch(
+        vault_path=paths.vault_path,
+        referenced_note_paths=report.get("referenced_note_paths") or [],
+        referenced_at=report["completed_at"],
+    )
+    touched_destination_vaults.extend(touch_destination_vaults_for_note_paths(reference_update["updated_note_paths"]))
     unique_destinations = unique_preserving_order(touched_destination_vaults)
     destination_result = (
         refresh_destination_mocs(
@@ -1766,6 +2056,9 @@ def apply_picoclaw_report(
         failed_count=failed_count,
         touched_destination_vaults=unique_destinations,
         destination_mocs=destination_result.destination_mocs,
+        referenced_note_paths=report.get("referenced_note_paths") or [],
+        reactivated_note_paths=reference_update["reactivated_note_paths"],
+        relation_updated_note_paths=reference_update["relation_updated_note_paths"],
     )
     write_json_file(root_paths.status_path, result.to_dict())
     return result

@@ -117,6 +117,23 @@ class CliPipelineCommandsTest(unittest.TestCase):
             self.assertEqual(cli.main(), 0)
             self.assertIn("pipeline_reports_applied: 1", stdout.getvalue())
 
+    def test_record_agent_reference_dispatches(self) -> None:
+        payload = {
+            "referenced_at": "2026-03-31T01:07:00+00:00",
+            "referenced_note_paths": ["TechVault/demo.md"],
+            "reactivated_note_paths": ["TechVault/demo.md"],
+            "relation_updated_note_paths": [],
+            "touched_destination_vaults": ["TechVault"],
+            "destination_mocs": {"TechVault": "/tmp/vault/TechVault/MOC.md"},
+        }
+        with (
+            patch("sys.argv", ["obs-auto-moc", "record-agent-reference", "--note-path", "TechVault/demo.md", "--json"]),
+            patch("obs_auto_moc.cli.record_agent_references", return_value=SimpleNamespace(to_dict=lambda: payload)),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            self.assertEqual(cli.main(), 0)
+            self.assertIn('"reactivated_note_paths": [', stdout.getvalue())
+
     def test_run_pipeline_once_dispatches(self) -> None:
         payload = {
             "generated_at": "2026-03-31T01:10:00+00:00",

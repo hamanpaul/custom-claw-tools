@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch obs-auto-moc inputs and trigger pipeline
+
+[Path]
+PathModified=%h/.picoclaw/workspace/notes/root-note
+PathModified=%h/.picoclaw/workspace/notes/claw/moc/pipeline/picoclaw-report-inbox
+Unit=obs-auto-moc-pipeline.service
+
+[Install]
+WantedBy=default.target
