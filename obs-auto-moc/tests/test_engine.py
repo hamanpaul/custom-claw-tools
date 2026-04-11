@@ -18,6 +18,7 @@ from obs_auto_moc.engine import (
     monitor_root_note,
     parse_markdown_text,
     queue_picoclaw_report,
+    record_agent_references,
     refresh_destination_mocs,
     run_pipeline_once,
 )
@@ -124,6 +125,25 @@ class BuildWorkspaceTest(unittest.TestCase):
                 "No links here.\n",
                 encoding="utf-8",
             )
+            (vault_path / "TechVault" / "decayed.md").write_text(
+                "---\n"
+                "title: Decayed\n"
+                "tags: [tech, decayed]\n"
+                "status: decayed\n"
+                "decayed: true\n"
+                "---\n"
+                "Sleepy note.\n",
+                encoding="utf-8",
+            )
+            (vault_path / "ObsToolsVault").mkdir(parents=True)
+            (vault_path / "ObsToolsVault" / "rules.md").write_text(
+                "---\n"
+                "title: Rules\n"
+                "tags: [rules]\n"
+                "---\n"
+                "Should stay outside build scope.\n",
+                encoding="utf-8",
+            )
 
             result = build_workspace(sync_root=sync_root, generated_at="2026-03-28T00:00:00+00:00", apply=True)
 
@@ -143,6 +163,8 @@ class BuildWorkspaceTest(unittest.TestCase):
             manifest_rows = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(manifest_rows), 3)
             self.assertTrue(any(row["note_name"] == "alpha" for row in manifest_rows))
+            self.assertFalse(any(row["note_name"] == "decayed" for row in manifest_rows))
+            self.assertFalse(any(row["note_name"] == "rules" for row in manifest_rows))
 
             preview_text = preview_path.read_text(encoding="utf-8")
             proposal_text = proposal_path.read_text(encoding="utf-8")
@@ -400,6 +422,121 @@ class RootNotePipelineTest(unittest.TestCase):
             state_payload = json.loads(result.state_path.read_text(encoding="utf-8"))
             self.assertEqual(state_payload["entries"]["root-note/entry.md"]["status"], "failed")
             self.assertIn("missing destination note", state_payload["entries"]["root-note/entry.md"]["last_error"])
+
+    def test_apply_picoclaw_report_reactivates_decayed_references_and_rebuilds_related_links(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            root_note_path = vault_path / "root-note"
+            tech_path = vault_path / "TechVault"
+            work_path = vault_path / "WorkVault"
+            personal_path = vault_path / "PersonalVault"
+            config_dir.mkdir(parents=True)
+            root_note_path.mkdir(parents=True)
+            tech_path.mkdir(parents=True)
+            work_path.mkdir(parents=True)
+            personal_path.mkdir(parents=True)
+            (config_dir / "config.json").write_text(
+                json.dumps({"vaultPath": str(vault_path)}),
+                encoding="utf-8",
+            )
+
+            root_note_file = root_note_path / "entry.md"
+            root_note_file.write_text(
+                "---\n"
+                "title: Inbox Entry\n"
+                "tags: [inbox]\n"
+                "---\n"
+                "Already reviewed.\n",
+                encoding="utf-8",
+            )
+            monitor_result = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T00:00:00+00:00")
+            handoff_payload = json.loads(monitor_result.handoff_path.read_text(encoding="utf-8"))
+
+            (tech_path / "atomic-note.md").write_text(
+                "---\n"
+                "title: Atomic Note\n"
+                "tags: [tech]\n"
+                "---\n"
+                "Linked from root-note.\n",
+                encoding="utf-8",
+            )
+            dormant_tech = tech_path / "dormant-a.md"
+            dormant_tech.write_text(
+                "---\n"
+                "title: Dormant A\n"
+                "tags: [tech, decayed]\n"
+                "status: decayed\n"
+                "decayed: true\n"
+                "---\n"
+                "sleep\n",
+                encoding="utf-8",
+            )
+            dormant_work = work_path / "dormant-b.md"
+            dormant_work.write_text(
+                "---\n"
+                "title: Dormant B\n"
+                "tags: [work, decayed]\n"
+                "status: decayed\n"
+                "decayed: true\n"
+                "---\n"
+                "sleep\n",
+                encoding="utf-8",
+            )
+
+            report_path = root / "picoclaw-report.json"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "job_id": monitor_result.job_id,
+                        "reported_by": "PicoClaw",
+                        "completed_at": "2026-03-31T00:10:00+00:00",
+                        "referenced_note_paths": [
+                            "TechVault/dormant-a.md",
+                            "WorkVault/dormant-b.md",
+                        ],
+                        "entries": [
+                            {
+                                "source_path": "root-note/entry.md",
+                                "fingerprint": handoff_payload["entries"][0]["fingerprint"],
+                                "status": "processed",
+                                "outputs": [
+                                    {
+                                        "destination_vault": "TechVault",
+                                        "note_path": "TechVault/atomic-note.md",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            result = apply_picoclaw_report(report_path=report_path, sync_root=sync_root)
+
+            self.assertEqual(set(result.reactivated_note_paths), {"TechVault/dormant-a.md", "WorkVault/dormant-b.md"})
+            self.assertEqual(
+                set(result.relation_updated_note_paths),
+                {"TechVault/dormant-a.md", "WorkVault/dormant-b.md"},
+            )
+            self.assertIn("TechVault", result.destination_mocs)
+            self.assertIn("WorkVault", result.destination_mocs)
+
+            dormant_tech_text = dormant_tech.read_text(encoding="utf-8")
+            dormant_work_text = dormant_work.read_text(encoding="utf-8")
+            self.assertIn("decayed: false", dormant_tech_text)
+            self.assertIn("status: active", dormant_tech_text)
+            self.assertIn("[[WorkVault/dormant-b]]", dormant_tech_text)
+            self.assertIn("decayed: false", dormant_work_text)
+            self.assertIn("status: active", dormant_work_text)
+            self.assertIn("[[TechVault/dormant-a]]", dormant_work_text)
+            self.assertEqual(parse_markdown_text(dormant_tech_text).frontmatter["last_resonated_at"], "2026-03-31T00:10:00+00:00")
+            self.assertEqual(parse_markdown_text(dormant_work_text).frontmatter["last_resonated_at"], "2026-03-31T00:10:00+00:00")
 
     def test_refresh_destination_mocs_updates_requested_destination_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1016,6 +1153,78 @@ class RootNotePipelineTest(unittest.TestCase):
             next_handoff = json.loads(Path(payload["pipeline_result"]["handoff_path"]).read_text(encoding="utf-8"))
             self.assertEqual(next_handoff["entries"][0]["source_path"], "root-note/entry-two.md")
             self.assertTrue((tech_path / "MOC.md").exists())
+
+    def test_loopback_listener_accepts_agent_reference_callback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            tech_path = vault_path / "TechVault"
+            config_dir.mkdir(parents=True)
+            tech_path.mkdir(parents=True)
+            (vault_path / "root-note").mkdir(parents=True)
+            (vault_path / "WorkVault").mkdir(parents=True)
+            (vault_path / "PersonalVault").mkdir(parents=True)
+            (config_dir / "config.json").write_text(json.dumps({"vaultPath": str(vault_path)}), encoding="utf-8")
+            dormant_path = tech_path / "dormant.md"
+            dormant_path.write_text(
+                "---\n"
+                "title: Dormant\n"
+                "tags: [tech, decayed]\n"
+                "status: decayed\n"
+                "decayed: true\n"
+                "---\n"
+                "sleep\n",
+                encoding="utf-8",
+            )
+
+            server = Thread(
+                target=serve_loopback,
+                kwargs={
+                    "sync_root": sync_root,
+                    "host": "127.0.0.1",
+                    "port": 45492,
+                    "run_pipeline": False,
+                },
+                daemon=True,
+            )
+            server.start()
+            for _ in range(50):
+                try:
+                    conn = HTTPConnection("127.0.0.1", 45492, timeout=1)
+                    conn.request("GET", "/health")
+                    health = conn.getresponse()
+                    if health.status == 200:
+                        break
+                except OSError:
+                    continue
+            else:
+                self.fail("loopback listener did not become ready")
+
+            health_payload = json.loads(health.read().decode("utf-8"))
+            self.assertEqual(health_payload["agent_reference_endpoint"], "/agent-reference")
+
+            conn.request(
+                "POST",
+                "/agent-reference",
+                body=json.dumps(
+                    {
+                        "referenced_at": "2026-03-31T05:40:00+00:00",
+                        "referenced_note_paths": ["TechVault/dormant.md"],
+                    }
+                ),
+                headers={"Content-Type": "application/json"},
+            )
+            response = conn.getresponse()
+            self.assertEqual(response.status, 200)
+            payload = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(payload["reactivated_note_paths"], ["TechVault/dormant.md"])
+            self.assertIn("TechVault", payload["destination_mocs"])
+
+            updated_text = dormant_path.read_text(encoding="utf-8")
+            self.assertIn("decayed: false", updated_text)
+            self.assertEqual(parse_markdown_text(updated_text).frontmatter["last_resonated_at"], "2026-03-31T05:40:00+00:00")
 
 
 if __name__ == "__main__":

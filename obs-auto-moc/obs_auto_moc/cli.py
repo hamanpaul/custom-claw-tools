@@ -11,6 +11,7 @@ from .engine import (
     load_last_run,
     monitor_root_note,
     queue_picoclaw_report,
+    record_agent_references,
     refresh_destination_mocs,
     resolve_paths,
     run_pipeline_once,
@@ -73,6 +74,17 @@ def build_parser() -> argparse.ArgumentParser:
     queue_report.add_argument("--report", type=Path, required=True)
     queue_report.add_argument("--run-pipeline", action="store_true", help="apply the queued report immediately by running one pipeline tick")
     queue_report.add_argument("--json", action="store_true", help="print machine-readable summary")
+
+    record_reference = subparsers.add_parser(
+        "record-agent-reference",
+        help="record an agent reference batch, reactivate Decayed notes, and rebuild related links",
+    )
+    record_reference.add_argument("--sync-root", type=Path, default=Path("~/.config/obsidian-headless/sync"))
+    record_reference.add_argument("--vault-path", type=Path)
+    record_reference.add_argument("--artifacts-root", type=Path)
+    record_reference.add_argument("--note-path", action="append", dest="note_paths")
+    record_reference.add_argument("--referenced-at")
+    record_reference.add_argument("--json", action="store_true", help="print machine-readable summary")
 
     refresh = subparsers.add_parser(
         "refresh-destination-mocs",
@@ -166,6 +178,9 @@ def print_report_apply_summary(result: dict[str, object]) -> None:
     print(f"skipped_count: {result['skipped_count']}")
     print(f"failed_count: {result['failed_count']}")
     print(f"touched_destination_vaults: {', '.join(result['touched_destination_vaults'])}")
+    print(f"referenced_note_count: {len(result.get('referenced_note_paths') or [])}")
+    print(f"reactivated_note_count: {len(result.get('reactivated_note_paths') or [])}")
+    print(f"relation_updated_note_count: {len(result.get('relation_updated_note_paths') or [])}")
     for name, path in (result.get("destination_mocs") or {}).items():
         print(f"destination_moc[{name}]: {path}")
 
@@ -181,6 +196,16 @@ def print_queue_report_summary(result: dict[str, object]) -> None:
     if result.get("pipeline_result"):
         print(f"pipeline_reports_applied: {result['pipeline_result']['reports_applied']}")
         print(f"pipeline_handoff_job_id: {result['pipeline_result']['handoff_job_id']}")
+
+
+def print_agent_reference_summary(result: dict[str, object]) -> None:
+    print(f"referenced_at: {result['referenced_at']}")
+    print(f"referenced_note_count: {len(result.get('referenced_note_paths') or [])}")
+    print(f"reactivated_note_count: {len(result.get('reactivated_note_paths') or [])}")
+    print(f"relation_updated_note_count: {len(result.get('relation_updated_note_paths') or [])}")
+    print(f"touched_destination_vaults: {', '.join(result.get('touched_destination_vaults') or [])}")
+    for name, path in (result.get("destination_mocs") or {}).items():
+        print(f"destination_moc[{name}]: {path}")
 
 
 def print_refresh_summary(result: dict[str, object]) -> None:
@@ -305,6 +330,17 @@ def main() -> int:
             run_pipeline=args.run_pipeline,
         )
         emit_payload(result.to_dict(), as_json=args.json, printer=print_queue_report_summary)
+        return 0
+
+    if args.command == "record-agent-reference":
+        result = record_agent_references(
+            referenced_note_paths=args.note_paths or [],
+            referenced_at=args.referenced_at,
+            sync_root=args.sync_root.expanduser() if args.vault_path is None else None,
+            vault_path=args.vault_path.expanduser() if args.vault_path else None,
+            artifacts_root=args.artifacts_root.expanduser() if args.artifacts_root else None,
+        )
+        emit_payload(result.to_dict(), as_json=args.json, printer=print_agent_reference_summary)
         return 0
 
     if args.command == "refresh-destination-mocs":

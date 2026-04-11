@@ -12,6 +12,12 @@ It does **not** rewrite `notes/MOC.md` by default. A normal run only:
 
 Only `build --apply` writes the live `MOC.md`.
 
+Current guardrails:
+
+- `obs-auto-moc` only processes `root-note`, `TechVault`, `WorkVault`, and `PersonalVault`
+- notes marked `Decayed` are metadata-only, not moved to another folder
+- agent search / read / quote references can reactivate a Decayed note and recompute `last_resonated_at`
+
 ## Project layout
 
 - `SKILL.md`: versioned PicoClaw skill copy
@@ -102,6 +108,16 @@ cd /home/paul_chen/prj_pri/custom-claw-tools/obs-auto-moc
 ./bin/obs-auto-moc listen --host 127.0.0.1 --port 45460 --run-pipeline
 ```
 
+Record an agent reference batch, reactivate Decayed notes, and rebuild related links:
+
+```bash
+cd /home/paul_chen/prj_pri/custom-claw-tools/obs-auto-moc
+./bin/obs-auto-moc record-agent-reference \
+  --note-path TechVault/example.md \
+  --note-path WorkVault/another-note.md \
+  --json
+```
+
 ## Artifacts
 
 A normal `build` writes:
@@ -177,6 +193,7 @@ What exists now:
 - `monitor-root-note` detects changed Markdown files under `root-note/` and writes a structured PicoClaw handoff artifact
 - `apply-picoclaw-report` validates a structured PicoClaw completion report, updates root-note pipeline state, and refreshes destination MOCs
 - `queue-picoclaw-report` validates a PicoClaw completion report and drops it into the pipeline report inbox, optionally running the next pipeline tick immediately
+- `record-agent-reference` records an explicit agent reference batch, reactivates Decayed notes, updates `last_resonated_at`, and rebuilds `related` links for the touched note set
 - `refresh-destination-mocs` rebuilds script-maintained `MOC.md` files inside `TechVault`, `WorkVault`, and `PersonalVault`
 - `dispatch-picoclaw-handoff` submits a generated handoff job to live PicoClaw, captures the structured JSON report, and feeds it back into the pipeline
 - `run-pipeline-once` applies queued PicoClaw completion reports from the report inbox, emits the next handoff job from `root-note`, and when auto-dispatch is enabled, immediately submits that handoff to PicoClaw
@@ -186,12 +203,14 @@ What exists now:
 - if live PicoClaw returns a stale/wrong-job report or claims `processed` outputs that do not exist, `dispatch-picoclaw-handoff` falls back locally by copying the source root-note into the selected destination vault(s) and queueing a valid report for the pipeline
 - the handoff artifact now advertises `ObsToolsVault/README.md` as the Stage 2 ruleset source for PicoClaw
 - the handoff artifact also includes `vault_path` and per-destination root paths so PicoClaw can write destination notes before reporting completion
-- `listen` exposes a loopback-only callback listener on `127.0.0.1` for `GET /health` and `POST /picoclaw-report`
+- `listen` exposes a loopback-only callback listener on `127.0.0.1` for `GET /health`, `POST /picoclaw-report`, and `POST /agent-reference`
 - the handoff callback contract now includes the default loopback callback endpoint `http://127.0.0.1:45460/picoclaw-report`
+- PicoClaw completion reports may include `referenced_note_paths`, and the listener also accepts direct `agent-reference` callbacks for non-pipeline agent activity
 
 What is live now:
 
 - `obs-auto-moc-listener.service` keeps the loopback callback listener up on `127.0.0.1:45460`
+- `obs-auto-moc-pipeline.path` proactively triggers a pipeline run when `root-note/` or the report inbox changes
 - `obs-auto-moc-pipeline.timer` periodically runs `bin/obs-auto-moc-runner`
 - `bin/obs-auto-moc-runner` defaults `OBS_AUTO_MOC_AUTO_DISPATCH=1` and dispatches new handoff jobs to `PicoClaw`
 - the live dispatch path uses `/usr/bin/picoclaw agent --session cron:obs-auto-moc:<job_id>` so each handoff gets an isolated PicoClaw session instead of reusing stale conversation history
@@ -203,6 +222,7 @@ The repo now includes a first deployment scaffold for pi3:
 - `bin/obs-auto-moc-listen`
 - `bin/obs-auto-moc-runner`
 - `systemd/obs-auto-moc-listener.service`
+- `systemd/obs-auto-moc-pipeline.path`
 - `systemd/obs-auto-moc-pipeline.service`
 - `systemd/obs-auto-moc-pipeline.timer`
 
@@ -212,10 +232,12 @@ Suggested deployment flow:
 cd /home/haman/custom-claw-tools/obs-auto-moc
 chmod +x bin/obs-auto-moc-listen bin/obs-auto-moc-runner
 cp systemd/obs-auto-moc-listener.service ~/.config/systemd/user/
+cp systemd/obs-auto-moc-pipeline.path ~/.config/systemd/user/
 cp systemd/obs-auto-moc-pipeline.service ~/.config/systemd/user/
 cp systemd/obs-auto-moc-pipeline.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now obs-auto-moc-listener.service
+systemctl --user enable --now obs-auto-moc-pipeline.path
 systemctl --user enable --now obs-auto-moc-pipeline.timer
 ```
 
@@ -223,6 +245,7 @@ Quick checks:
 
 ```bash
 systemctl --user status obs-auto-moc-listener.service
+systemctl --user status obs-auto-moc-pipeline.path
 systemctl --user status obs-auto-moc-pipeline.timer
 curl http://127.0.0.1:45460/health
 ```
@@ -248,4 +271,12 @@ Example callback POST from a local PicoClaw relay:
 curl -X POST http://127.0.0.1:45460/picoclaw-report \
   -H 'content-type: application/json' \
   --data @report.json
+```
+
+Example direct agent-reference callback:
+
+```bash
+curl -X POST http://127.0.0.1:45460/agent-reference \
+  -H 'content-type: application/json' \
+  --data '{"referenced_at":"2026-04-10T00:00:00+00:00","referenced_note_paths":["TechVault/example.md","WorkVault/another-note.md"]}'
 ```
