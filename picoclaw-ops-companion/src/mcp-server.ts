@@ -253,6 +253,47 @@ async function main(): Promise<void> {
           type: 'string',
           description: 'The GitHub research query or research prompt.',
         },
+        searches: {
+          type: 'array',
+          description:
+            'Optional search plan for running multiple GitHub searches inside one github_research request.',
+          items: {
+            type: 'object',
+            properties: {
+              label: {
+                type: 'string',
+                description: 'Optional human-readable label for this planned search.',
+              },
+              query: {
+                type: 'string',
+                description: 'The search query for this planned search.',
+              },
+              scope: {
+                type: 'string',
+                enum: ['repo', 'org', 'user', 'global'],
+              },
+              repo: {
+                type: 'string',
+                description: 'Repository in owner/name form for repo scope.',
+              },
+              owner: {
+                type: 'string',
+                description: 'Owner or user for org/user scope.',
+              },
+              mode: {
+                type: 'string',
+                enum: ['generic', 'issues', 'pull_requests', 'code', 'repositories'],
+              },
+              limit: {
+                type: 'integer',
+                minimum: 1,
+                maximum: 100,
+              },
+            },
+            required: ['query'],
+            additionalProperties: false,
+          },
+        },
         scope: {
           type: 'string',
           enum: ['repo', 'org', 'user', 'global'],
@@ -285,18 +326,40 @@ async function main(): Promise<void> {
           description: 'Optional caller-supplied request ID.',
         },
       },
-      required: ['query'],
+      anyOf: [{ required: ['query'] }, { required: ['searches'] }],
       additionalProperties: false,
     },
     argsSchema: z.object({
       sender: z.string().trim().min(1).default(DEFAULT_LOW_RISK_SENDER),
-      query: z.string().trim().min(1),
+      query: z.string().trim().min(1).optional(),
+      searches: z
+        .array(
+          z.object({
+            label: z.string().trim().min(1).optional(),
+            query: z.string().trim().min(1),
+            scope: z.enum(['repo', 'org', 'user', 'global']).optional(),
+            repo: z.string().trim().min(1).optional(),
+            owner: z.string().trim().min(1).optional(),
+            mode: z.enum(['generic', 'issues', 'pull_requests', 'code', 'repositories']).optional(),
+            limit: z.number().int().positive().max(100).optional(),
+          }),
+        )
+        .min(1)
+        .optional(),
       scope: z.enum(['repo', 'org', 'user', 'global']).optional(),
       repo: z.string().trim().min(1).optional(),
       owner: z.string().trim().min(1).optional(),
       mode: z.enum(['generic', 'issues', 'pull_requests', 'code', 'repositories']).default('generic'),
       limit: z.number().int().positive().max(100).default(10),
       requestId: z.string().trim().min(1).optional(),
+    }).superRefine((value, ctx) => {
+      if (!value.query && !value.searches?.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'github_research requires query or searches',
+          path: ['query'],
+        });
+      }
     }),
     handler: async (args) => {
       const workflow = await runIntakeWorkflowDirect(

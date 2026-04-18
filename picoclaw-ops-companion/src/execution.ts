@@ -590,6 +590,15 @@ function resolveAllowedRoot(
 function describeGitHubResearchTarget(
   request: Extract<CompanionRequest, { type: 'github_research' }>,
 ): string {
+  if (request.payload.searches?.length) {
+    return request.payload.searches.length === 1
+      ? request.payload.searches[0]?.label ??
+          request.payload.searches[0]?.repo ??
+          request.payload.searches[0]?.owner ??
+          'github-research'
+      : `${request.payload.searches.length}-search plan`;
+  }
+
   return request.target.repo ?? request.target.owner ?? 'global-github';
 }
 

@@ -55,6 +55,47 @@ MVP request 應使用結構化格式，而不是自由 prompt：
 }
 ```
 
+若要把多個 GitHub 子研究收斂成單一 request，可改用同一個 `github_research` request 內的 `payload.searches`：
+
+```json
+{
+  "requestId": "req-20260418-001",
+  "type": "github_research",
+  "scope": "mixed",
+  "target": {},
+  "payload": {
+    "query": "morning aggregated research",
+    "mode": "generic",
+    "limit": 10,
+    "searches": [
+      {
+        "label": "repo-architecture",
+        "scope": "repo",
+        "repo": "milla-jovovich/mempalace",
+        "query": "read README and understand AAAK and implementation details",
+        "mode": "generic",
+        "limit": 10
+      },
+      {
+        "label": "owner-related-repos",
+        "scope": "user",
+        "owner": "hamanpaul",
+        "query": "find suitable repositories to integrate with MemPalace or AAAK",
+        "mode": "repositories",
+        "limit": 10
+      }
+    ]
+  },
+  "requestedBy": "telegram:<PRIMARY_USER_ID>"
+}
+```
+
+執行語意：
+
+- `payload.searches` 內每個 entry 都是同一個 request 的子 search
+- companion 會在同一個 Copilot session 內整合這些 search
+- 對外只產生一個 request / result / audit chain，而不是多個 `req-github-research-*`
+
 ### MVP request types
 
 - `github_research`

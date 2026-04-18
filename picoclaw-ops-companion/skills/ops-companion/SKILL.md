@@ -149,7 +149,7 @@ ops-workspace-analysis [--scope notes|workspace|repo] [--write-artifacts] SENDER
 ```
 
 ```bash
-ops-github-research [--mode MODE] [--limit N] SENDER OWNER REPO "QUERY..."
+ops-github-research [--mode MODE] [--limit N] [--search-plan-file PATH] SENDER [OWNER REPO "QUERY..."]
 ```
 
 ```bash

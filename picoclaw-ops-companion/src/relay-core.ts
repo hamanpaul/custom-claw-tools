@@ -39,13 +39,24 @@ export type WorkspaceAnalysisInput = {
 
 export type GithubResearchInput = {
   sender: string;
-  query: string;
+  query?: string;
   scope?: 'repo' | 'org' | 'user' | 'global';
   repo?: string;
   owner?: string;
   mode: 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories';
   limit: number;
   requestId?: string;
+  searches?: GithubResearchSearchInput[];
+};
+
+export type GithubResearchSearchInput = {
+  label?: string;
+  query: string;
+  scope?: 'repo' | 'org' | 'user' | 'global';
+  repo?: string;
+  owner?: string;
+  mode?: 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories';
+  limit?: number;
 };
 
 export type RepoRelayPushInput = {
@@ -198,19 +209,12 @@ export function buildWorkspaceAnalysisRequest(
 export function buildGithubResearchRequest(
   command: GithubResearchInput,
 ): CompanionRequest {
-  const scope = resolveGithubScope(command);
-
-  if (scope === 'repo' && !command.repo) {
-    throw new Error('github-research with repo scope requires --repo <owner/name>');
+  const searches = normalizeGithubResearchSearches(command);
+  const primarySearch = searches[0];
+  if (!primarySearch) {
+    throw new Error('github-research requires at least one normalized search');
   }
-
-  if ((scope === 'org' || scope === 'user') && !command.owner) {
-    throw new Error(`github-research with ${scope} scope requires --owner <owner>`);
-  }
-
-  if (scope === 'global' && (command.repo || command.owner)) {
-    throw new Error('github-research with global scope cannot include --repo or --owner');
-  }
+  const scope = searches.length > 1 ? 'mixed' : primarySearch.scope;
 
   return {
     requestId: command.requestId ?? buildRequestId('github-research'),
@@ -218,13 +222,14 @@ export function buildGithubResearchRequest(
     type: 'github_research',
     scope,
     target: {
-      ...(command.repo ? { repo: command.repo } : {}),
-      ...(command.owner ? { owner: command.owner } : {}),
+      ...(primarySearch.repo ? { repo: primarySearch.repo } : {}),
+      ...(primarySearch.owner ? { owner: primarySearch.owner } : {}),
     },
     payload: {
-      query: command.query,
-      mode: command.mode,
-      limit: command.limit,
+      query: primarySearch.query,
+      mode: primarySearch.mode,
+      limit: primarySearch.limit,
+      ...(command.searches?.length ? { searches } : {}),
     },
   };
 }
@@ -337,6 +342,110 @@ function resolveGithubScope(
   }
 
   if (command.owner) {
+    throw new Error('github-research with --owner requires explicit --scope org or user');
+  }
+
+  return 'global';
+}
+
+function normalizeGithubResearchSearches(
+  command: GithubResearchInput,
+): Array<{
+  label?: string;
+  query: string;
+  scope: 'repo' | 'org' | 'user' | 'global';
+  repo?: string;
+  owner?: string;
+  mode: 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories';
+  limit: number;
+}> {
+  if (command.searches?.length) {
+    return command.searches.map((search) => normalizeGithubResearchSearch(search, command));
+  }
+
+  if (!command.query) {
+    throw new Error('github-research requires --query when --search-plan-file is not used');
+  }
+
+  return [
+    normalizeGithubResearchSearch(
+      {
+        query: command.query,
+        scope: command.scope,
+        repo: command.repo,
+        owner: command.owner,
+        mode: command.mode,
+        limit: command.limit,
+      },
+      command,
+    ),
+  ];
+}
+
+function normalizeGithubResearchSearch(
+  search: GithubResearchSearchInput,
+  defaults: GithubResearchInput,
+): {
+  label?: string;
+  query: string;
+  scope: 'repo' | 'org' | 'user' | 'global';
+  repo?: string;
+  owner?: string;
+  mode: 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories';
+  limit: number;
+} {
+  const scope = resolveGithubSearchScope(search, defaults);
+  const repo = search.repo ?? defaults.repo;
+  const owner = search.owner ?? defaults.owner;
+
+  if (scope === 'repo' && !repo) {
+    throw new Error('github-research with repo scope requires --repo <owner/name>');
+  }
+
+  if ((scope === 'org' || scope === 'user') && !owner) {
+    throw new Error(`github-research with ${scope} scope requires --owner <owner>`);
+  }
+
+  if (scope === 'global' && (repo || owner)) {
+    throw new Error('github-research with global scope cannot include --repo or --owner');
+  }
+
+  return {
+    ...(search.label ? { label: search.label } : {}),
+    query: search.query,
+    scope,
+    ...(repo ? { repo } : {}),
+    ...(owner ? { owner } : {}),
+    mode: search.mode ?? defaults.mode,
+    limit: search.limit ?? defaults.limit,
+  };
+}
+
+function resolveGithubSearchScope(
+  search: GithubResearchSearchInput,
+  defaults: GithubResearchInput,
+): 'repo' | 'org' | 'user' | 'global' {
+  if (search.scope) {
+    return search.scope;
+  }
+
+  if (search.repo) {
+    return 'repo';
+  }
+
+  if (search.owner) {
+    throw new Error('github-research with --owner requires explicit --scope org or user');
+  }
+
+  if (defaults.scope) {
+    return defaults.scope;
+  }
+
+  if (defaults.repo) {
+    return 'repo';
+  }
+
+  if (defaults.owner) {
     throw new Error('github-research with --owner requires explicit --scope org or user');
   }
 

@@ -196,7 +196,7 @@ chmod +x bin/picoclaw-ops-relay
 - `intake-file --request-file <path> [--auto-execute]`
 - `intake-json --request-json <json> [--auto-execute]`
 - `workspace-analysis --sender <telegram:id> --path <path> --prompt <text> [--scope <notes|workspace|repo>] [--write-artifacts] [--request-id <request-id>] [--no-execute]`
-- `github-research --sender <telegram:id> --query <text> [--scope <repo|org|user|global>] [--repo <owner/name>] [--owner <owner>] [--mode <generic|issues|pull_requests|code|repositories>] [--limit <n>] [--request-id <request-id>] [--no-execute]`
+- `github-research --sender <telegram:id> (--query <text> | --search-plan-file <path>) [--scope <repo|org|user|global>] [--repo <owner/name>] [--owner <owner>] [--mode <generic|issues|pull_requests|code|repositories>] [--limit <n>] [--request-id <request-id>] [--no-execute]`
 - `repo-relay-push --sender <telegram:id> --repo-path <path> [--remote <name>] [--branch <name>] [--revision <rev>] [--transport <relay|bundle>] [--request-id <request-id>] [--no-execute]`
 - `npm-install-package --sender <telegram:id> --project-path <path> --package <name> [--package <name> ...] [--scope <project|user>] [--dev] [--global] [--request-id <request-id>] [--no-execute]`
 
@@ -218,6 +218,44 @@ bin/picoclaw-ops-relay github-research \
   --query "recent obs-auto-moc and ops-companion related commits" \
   --mode code
 ```
+
+範例：把晨間多個子題收斂成**單一** GitHub research request：
+
+```json
+[
+  {
+    "label": "repo-architecture",
+    "scope": "repo",
+    "repo": "milla-jovovich/mempalace",
+    "query": "read README and understand AAAK and implementation details",
+    "mode": "generic",
+    "limit": 10
+  },
+  {
+    "label": "owner-related-repos",
+    "scope": "user",
+    "owner": "hamanpaul",
+    "query": "find suitable repositories to integrate with MemPalace or AAAK",
+    "mode": "repositories",
+    "limit": 10
+  },
+  {
+    "label": "global-followups",
+    "scope": "global",
+    "query": "MemPalace AAAK related implementations and follow-up repos",
+    "mode": "repositories",
+    "limit": 10
+  }
+]
+```
+
+```bash
+bin/picoclaw-ops-relay github-research \
+  --sender telegram:<PRIMARY_USER_ID> \
+  --search-plan-file /tmp/morning-research-plan.json
+```
+
+這樣 companion 會建立 **一個** `github_research` request，並在同一個 Copilot session 內把整份 search plan 跑完，而不是 fan-out 成多個 request/result。
 
 範例：relay `/approve` 指令，並在批准後自動接 `execute`：
 

@@ -57,12 +57,13 @@ type RelayCommand =
   | {
       name: 'github-research';
       sender: string;
-      query: string;
+      query?: string;
       scope?: 'repo' | 'org' | 'user' | 'global';
       repo?: string;
       owner?: string;
       mode: 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories';
       limit: number;
+      searchPlanFile?: string;
       requestId?: string;
       autoExecute: boolean;
     }
@@ -98,7 +99,7 @@ const usage = [
   '  picoclaw-ops-relay intake-file --request-file <path> [--auto-execute]',
   '  picoclaw-ops-relay intake-json --request-json <json> [--auto-execute]',
   '  picoclaw-ops-relay workspace-analysis --sender <telegram:id> --path <path> --prompt <text> [--scope <notes|workspace|repo>] [--write-artifacts] [--request-id <request-id>] [--no-execute]',
-  '  picoclaw-ops-relay github-research --sender <telegram:id> --query <text> [--scope <repo|org|user|global>] [--repo <owner/name>] [--owner <owner>] [--mode <generic|issues|pull_requests|code|repositories>] [--limit <n>] [--request-id <request-id>] [--no-execute]',
+  '  picoclaw-ops-relay github-research --sender <telegram:id> (--query <text> | --search-plan-file <path>) [--scope <repo|org|user|global>] [--repo <owner/name>] [--owner <owner>] [--mode <generic|issues|pull_requests|code|repositories>] [--limit <n>] [--request-id <request-id>] [--no-execute]',
   '  picoclaw-ops-relay repo-relay-push --sender <telegram:id> --repo-path <path> [--remote <name>] [--branch <name>] [--revision <rev>] [--transport <relay|bundle>] [--request-id <request-id>] [--no-execute]',
   '  picoclaw-ops-relay npm-install-package --sender <telegram:id> --project-path <path> --package <name> [--package <name> ...] [--scope <project|user>] [--dev] [--global] [--request-id <request-id>] [--no-execute]',
 ].join('\n');
@@ -194,7 +195,12 @@ async function main(): Promise<void> {
     }
 
     case 'github-research': {
-      const request = buildGithubResearchRequest(command);
+      const request = buildGithubResearchRequest({
+        ...command,
+        ...(command.searchPlanFile
+          ? { searches: await loadGithubResearchSearchPlan(command.searchPlanFile) }
+          : {}),
+      });
       writeOutput({
         command: command.name,
         ...(await runIntakeWorkflow(layout, config, request, command.autoExecute)),
@@ -291,20 +297,27 @@ function parseRelayArgs(argv: string[]): RelayCommand {
     const mode = readFlagValue(rest, '--mode') ?? 'generic';
     const limitText = readFlagValue(rest, '--limit');
     const limit = limitText ? parsePositiveInt(limitText, '--limit') : 10;
+    const query = readFlagValue(rest, '--query');
+    const searchPlanFile = readFlagValue(rest, '--search-plan-file');
 
     if (!['generic', 'issues', 'pull_requests', 'code', 'repositories'].includes(mode)) {
       throw new Error(`unsupported --mode value: ${mode}\n${usage}`);
     }
 
+    if (!query && !searchPlanFile) {
+      throw new Error(`github-research requires --query or --search-plan-file\n${usage}`);
+    }
+
     return {
       name: 'github-research',
       sender: requireFlagValue(rest, '--sender'),
-      query: requireFlagValue(rest, '--query'),
+      query,
       scope: readFlagValue(rest, '--scope') as 'repo' | 'org' | 'user' | 'global' | undefined,
       repo: readFlagValue(rest, '--repo'),
       owner: readFlagValue(rest, '--owner'),
       mode: mode as 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories',
       limit,
+      searchPlanFile,
       requestId: readFlagValue(rest, '--request-id'),
       autoExecute: !rest.includes('--no-execute'),
     };
@@ -486,6 +499,54 @@ function readFlagValues(argv: string[], flagName: string): string[] {
 
 function writeOutput(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function loadGithubResearchSearchPlan(
+  searchPlanFile: string,
+): Promise<Array<{
+  label?: string;
+  query: string;
+  scope?: 'repo' | 'org' | 'user' | 'global';
+  repo?: string;
+  owner?: string;
+  mode?: 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories';
+  limit?: number;
+}>> {
+  const raw = await readFile(searchPlanFile, 'utf8');
+  const parsed = JSON.parse(raw) as unknown;
+
+  if (Array.isArray(parsed)) {
+    return parsed as Array<{
+      label?: string;
+      query: string;
+      scope?: 'repo' | 'org' | 'user' | 'global';
+      repo?: string;
+      owner?: string;
+      mode?: 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories';
+      limit?: number;
+    }>;
+  }
+
+  if (
+    parsed &&
+    typeof parsed === 'object' &&
+    'searches' in parsed &&
+    Array.isArray((parsed as { searches?: unknown }).searches)
+  ) {
+    return (parsed as { searches: Array<{
+      label?: string;
+      query: string;
+      scope?: 'repo' | 'org' | 'user' | 'global';
+      repo?: string;
+      owner?: string;
+      mode?: 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories';
+      limit?: number;
+    }> }).searches;
+  }
+
+  throw new Error(
+    'github-research --search-plan-file must be a JSON array or an object with a searches array',
+  );
 }
 
 main().catch((error: unknown) => {

@@ -18,6 +18,16 @@ const TOOL_TIMEOUT_MS = 30_000;
 const SESSION_TIMEOUT_MS = 120_000;
 
 type GitHubResearchRequest = Extract<CompanionRequest, { type: 'github_research' }>;
+type GitHubResearchSearchPlan = {
+  id: string;
+  label: string;
+  query: string;
+  scope: 'repo' | 'org' | 'user' | 'global';
+  repo?: string;
+  owner?: string;
+  mode: 'generic' | 'issues' | 'pull_requests' | 'code' | 'repositories';
+  limit: number;
+};
 
 type GitHubSearchItem = {
   kind: 'issue' | 'pull_request' | 'code' | 'repository';
@@ -34,8 +44,12 @@ type GitHubSearchItem = {
 };
 
 type GitHubSearchResult = {
+  searchId: string;
+  searchLabel: string;
+  scope: GitHubResearchSearchPlan['scope'];
+  targetLabel: string;
   endpoint: 'search/issues' | 'search/code' | 'search/repositories';
-  mode: GitHubResearchRequest['payload']['mode'];
+  mode: GitHubResearchSearchPlan['mode'];
   query: string;
   limit: number;
   executedAt: string;
@@ -46,6 +60,8 @@ type GitHubSearchResult = {
 type GitHubSearchInvocation = {
   toolName: string;
   executedAt: string;
+  searchCount: number;
+  searchIds: string[];
   itemCount: number;
   totalCount: number;
   reason?: string;
@@ -61,6 +77,7 @@ export type GitHubResearchExecutionArtifact = {
   availableTools: string[];
   excludedTools: string[];
   search: GitHubSearchResult;
+  searches: GitHubSearchResult[];
   toolInvocations: GitHubSearchInvocation[];
   assistantResponse: string;
 };
@@ -71,6 +88,11 @@ const searchToolParameters = z.object({
     .min(1)
     .optional()
     .describe('Why the agent wants to re-run the pre-approved GitHub search'),
+  searchId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Optional planned search ID when the request defines multiple searches'),
 });
 
 export async function runGithubResearchCopilot(
@@ -79,7 +101,9 @@ export async function runGithubResearchCopilot(
 ): Promise<GitHubResearchExecutionArtifact> {
   const client = new CopilotClient(buildClientOptions(config));
   const policy = buildGitHubResearchPolicy(config, request);
+  const searchPlan = buildGitHubResearchSearchPlan(request);
   const toolInvocations: GitHubSearchInvocation[] = [];
+  const cachedSearchResults = new Map<string, GitHubSearchResult>();
   let session:
     | Awaited<ReturnType<CopilotClient['createSession']>>
     | undefined;
@@ -90,17 +114,30 @@ export async function runGithubResearchCopilot(
       'Run the pre-approved GitHub search for the current structured github_research request and return normalized read-only results.',
     parameters: searchToolParameters,
     skipPermission: true,
-    handler: async ({ reason }) => {
-      const search = await executeGitHubSearch(config, request);
+    handler: async ({ reason, searchId }) => {
+      const searchBatch = await executeGitHubSearchBatch(
+        config,
+        searchPlan,
+        cachedSearchResults,
+        searchId,
+      );
       toolInvocations.push({
         toolName: SEARCH_TOOL_NAME,
-        executedAt: search.executedAt,
-        itemCount: search.items.length,
-        totalCount: search.totalCount,
+        executedAt: searchBatch.executedAt,
+        searchCount: searchBatch.searches.length,
+        searchIds: searchBatch.searches.map((search) => search.searchId),
+        itemCount: searchBatch.searches.reduce(
+          (count, search) => count + search.items.length,
+          0,
+        ),
+        totalCount: searchBatch.searches.reduce(
+          (count, search) => count + search.totalCount,
+          0,
+        ),
         reason,
       });
 
-      return search;
+      return searchBatch;
     },
   });
 
@@ -133,7 +170,11 @@ export async function runGithubResearchCopilot(
       throw new Error('Copilot SDK returned no assistant response for github_research');
     }
 
-    const search = await ensureSearchInvocation(config, request, toolInvocations);
+    const searches = ensureSearchInvocation(searchPlan, cachedSearchResults, toolInvocations);
+    const primarySearch = searches[0];
+    if (!primarySearch) {
+      throw new Error('github_research completed without producing a cached search result');
+    }
 
     return {
       requestId: request.requestId,
@@ -144,7 +185,8 @@ export async function runGithubResearchCopilot(
       systemMessage: policy.systemMessage,
       availableTools: policy.availableTools,
       excludedTools: policy.excludedTools,
-      search,
+      search: primarySearch,
+      searches,
       toolInvocations,
       assistantResponse,
     };
@@ -193,10 +235,23 @@ function buildGitHubResearchPolicy(
   availableTools: string[];
   excludedTools: string[];
 } {
-  const targetLabel =
-    request.target.repo ??
-    request.target.owner ??
-    'global-github';
+  const searchPlan = buildGitHubResearchSearchPlan(request);
+  const targetLabel = describeSearchPlan(searchPlan);
+  const searchPlanLines =
+    searchPlan.length > 1
+      ? [
+          '',
+          'Planned searches for this single request:',
+          ...searchPlan.map(
+            (search, index) =>
+              `${index + 1}. id=${search.id}; label=${search.label}; scope=${search.scope}; target=${describeSearchTarget(search)}; mode=${search.mode}; limit=${search.limit}; query=${search.query}`,
+          ),
+          '',
+          `Call "${SEARCH_TOOL_NAME}" once without searchId to execute every pending planned search in one batch before writing the final report.`,
+          'If you must re-run a specific planned search, call the tool again with that searchId.',
+          'Return one consolidated report across the whole plan, not one separate report per search.',
+        ]
+      : [];
 
   return {
     workingDirectory: config.projectRoot,
@@ -215,6 +270,7 @@ function buildGitHubResearchPolicy(
       `- mode: ${request.payload.mode}`,
       `- limit: ${request.payload.limit}`,
       `- query: ${request.payload.query}`,
+      ...searchPlanLines,
       '',
       `Use "${SEARCH_TOOL_NAME}" at least once, then produce a concise report with these sections:`,
       'Summary:',
@@ -246,13 +302,15 @@ function createPermissionHandler(): PermissionHandler {
   };
 }
 
-async function ensureSearchInvocation(
-  config: AppConfig,
-  request: GitHubResearchRequest,
+function ensureSearchInvocation(
+  searchPlan: GitHubResearchSearchPlan[],
+  cachedSearchResults: Map<string, GitHubSearchResult>,
   toolInvocations: GitHubSearchInvocation[],
-): Promise<GitHubSearchResult> {
+) {
   if (toolInvocations.length > 0) {
-    return executeGitHubSearch(config, request);
+    return searchPlan
+      .map((search) => cachedSearchResults.get(search.id))
+      .filter((search): search is GitHubSearchResult => Boolean(search));
   }
 
   throw new Error(
@@ -260,11 +318,44 @@ async function ensureSearchInvocation(
   );
 }
 
+async function executeGitHubSearchBatch(
+  config: AppConfig,
+  searchPlan: GitHubResearchSearchPlan[],
+  cachedSearchResults: Map<string, GitHubSearchResult>,
+  searchId?: string,
+): Promise<{
+  executedAt: string;
+  searches: GitHubSearchResult[];
+}> {
+  const selectedSearches = selectGitHubResearchSearches(
+    searchPlan,
+    cachedSearchResults,
+    searchId,
+  );
+  const searches = await Promise.all(
+    selectedSearches.map(async (search) => {
+      const cached = cachedSearchResults.get(search.id);
+      if (cached) {
+        return cached;
+      }
+
+      const result = await executeGitHubSearch(config, search);
+      cachedSearchResults.set(search.id, result);
+      return result;
+    }),
+  );
+
+  return {
+    executedAt: new Date().toISOString(),
+    searches,
+  };
+}
+
 async function executeGitHubSearch(
   config: AppConfig,
-  request: GitHubResearchRequest,
+  search: GitHubResearchSearchPlan,
 ): Promise<GitHubSearchResult> {
-  const searchSpec = buildGitHubSearchSpec(request);
+  const searchSpec = buildGitHubSearchSpec(search);
   const args = [
     'api',
     '--method',
@@ -287,94 +378,95 @@ async function executeGitHubSearch(
   });
   const payload = JSON.parse(stdout);
 
-  return normalizeGitHubSearchResult(searchSpec, payload);
+  return normalizeGitHubSearchResult(search, searchSpec, payload);
 }
 
 function buildGitHubSearchSpec(
-  request: GitHubResearchRequest,
+  search: GitHubResearchSearchPlan,
 ): {
   endpoint: GitHubSearchResult['endpoint'];
-  mode: GitHubResearchRequest['payload']['mode'];
+  mode: GitHubResearchSearchPlan['mode'];
   query: string;
   limit: number;
 } {
-  const qualifiers = buildSearchQualifiers(request);
+  const qualifiers = buildSearchQualifiers(search);
 
-  switch (request.payload.mode) {
+  switch (search.mode) {
     case 'issues':
       qualifiers.push('is:issue');
       return {
         endpoint: 'search/issues',
-        mode: request.payload.mode,
-        query: [request.payload.query, ...qualifiers].join(' ').trim(),
-        limit: request.payload.limit,
+        mode: search.mode,
+        query: [search.query, ...qualifiers].join(' ').trim(),
+        limit: search.limit,
       };
 
     case 'pull_requests':
       qualifiers.push('is:pr');
       return {
         endpoint: 'search/issues',
-        mode: request.payload.mode,
-        query: [request.payload.query, ...qualifiers].join(' ').trim(),
-        limit: request.payload.limit,
+        mode: search.mode,
+        query: [search.query, ...qualifiers].join(' ').trim(),
+        limit: search.limit,
       };
 
     case 'generic':
       return {
         endpoint: 'search/issues',
-        mode: request.payload.mode,
-        query: [request.payload.query, ...qualifiers].join(' ').trim(),
-        limit: request.payload.limit,
+        mode: search.mode,
+        query: [search.query, ...qualifiers].join(' ').trim(),
+        limit: search.limit,
       };
 
     case 'code':
       return {
         endpoint: 'search/code',
-        mode: request.payload.mode,
-        query: [request.payload.query, ...qualifiers].join(' ').trim(),
-        limit: request.payload.limit,
+        mode: search.mode,
+        query: [search.query, ...qualifiers].join(' ').trim(),
+        limit: search.limit,
       };
 
     case 'repositories':
       return {
         endpoint: 'search/repositories',
-        mode: request.payload.mode,
-        query: [request.payload.query, ...buildRepositoryQualifiers(request)].join(' ').trim(),
-        limit: request.payload.limit,
+        mode: search.mode,
+        query: [search.query, ...buildRepositoryQualifiers(search)].join(' ').trim(),
+        limit: search.limit,
       };
   }
 }
 
-function buildSearchQualifiers(request: GitHubResearchRequest): string[] {
-  switch (request.scope) {
+function buildSearchQualifiers(search: GitHubResearchSearchPlan): string[] {
+  switch (search.scope) {
     case 'repo':
-      return request.target.repo ? [`repo:${request.target.repo}`] : [];
+      return search.repo ? [`repo:${search.repo}`] : [];
 
     case 'org':
-      return request.target.owner ? [`org:${request.target.owner}`] : [];
+      return search.owner ? [`org:${search.owner}`] : [];
 
     case 'user':
-      return request.target.owner ? [`user:${request.target.owner}`] : [];
+      return search.owner ? [`user:${search.owner}`] : [];
 
     case 'global':
       return [];
   }
 }
 
-function buildRepositoryQualifiers(request: GitHubResearchRequest): string[] {
-  if (request.scope === 'repo' && request.target.repo) {
-    const [owner, repoName] = request.target.repo.split('/', 2);
+function buildRepositoryQualifiers(search: GitHubResearchSearchPlan): string[] {
+  if (search.scope === 'repo' && search.repo) {
+    const [owner, repoName] = search.repo.split('/', 2);
 
     return [owner ? `user:${owner}` : '', repoName ?? ''].filter(Boolean);
   }
 
-  return buildSearchQualifiers(request);
+  return buildSearchQualifiers(search);
 }
 
 function normalizeGitHubSearchResult(
+  search: GitHubResearchSearchPlan,
   searchSpec: {
     endpoint: GitHubSearchResult['endpoint'];
-    mode: GitHubResearchRequest['payload']['mode'];
+    mode: GitHubResearchSearchPlan['mode'];
     query: string;
     limit: number;
   },
@@ -386,6 +478,10 @@ function normalizeGitHubSearchResult(
     const result = issueSearchResponseSchema.parse(payload);
 
     return {
+      searchId: search.id,
+      searchLabel: search.label,
+      scope: search.scope,
+      targetLabel: describeSearchTarget(search),
       endpoint: searchSpec.endpoint,
       mode: searchSpec.mode,
       query: searchSpec.query,
@@ -409,6 +505,10 @@ function normalizeGitHubSearchResult(
     const result = codeSearchResponseSchema.parse(payload);
 
     return {
+      searchId: search.id,
+      searchLabel: search.label,
+      scope: search.scope,
+      targetLabel: describeSearchTarget(search),
       endpoint: searchSpec.endpoint,
       mode: searchSpec.mode,
       query: searchSpec.query,
@@ -428,6 +528,10 @@ function normalizeGitHubSearchResult(
   const result = repositorySearchResponseSchema.parse(payload);
 
   return {
+    searchId: search.id,
+    searchLabel: search.label,
+    scope: search.scope,
+    targetLabel: describeSearchTarget(search),
     endpoint: searchSpec.endpoint,
     mode: searchSpec.mode,
     query: searchSpec.query,
@@ -444,6 +548,79 @@ function normalizeGitHubSearchResult(
       stars: item.stargazers_count,
     })),
   };
+}
+
+function buildGitHubResearchSearchPlan(
+  request: GitHubResearchRequest,
+): GitHubResearchSearchPlan[] {
+  const plannedSearches = request.payload.searches?.length
+    ? request.payload.searches
+    : [
+        {
+          query: request.payload.query ?? '',
+          scope: request.scope === 'mixed' ? 'global' : request.scope,
+          repo: request.target.repo,
+          owner: request.target.owner,
+          mode: request.payload.mode,
+          limit: request.payload.limit,
+        },
+      ];
+
+  return plannedSearches.map((search, index) => {
+    const scope =
+      search.scope ??
+      (search.repo ? 'repo' : undefined) ??
+      (search.owner ? request.scope === 'user' ? 'user' : 'org' : undefined) ??
+      (request.scope === 'mixed' ? 'global' : request.scope);
+
+    if (!scope) {
+      throw new Error('github_research search plan contains an unresolved scope');
+    }
+
+    return {
+      id: `search-${index + 1}`,
+      label: search.label?.trim() || `search-${index + 1}`,
+      query: search.query,
+      scope,
+      ...(search.repo ?? request.target.repo ? { repo: search.repo ?? request.target.repo } : {}),
+      ...(search.owner ?? request.target.owner ? { owner: search.owner ?? request.target.owner } : {}),
+      mode: search.mode ?? request.payload.mode,
+      limit: search.limit ?? request.payload.limit,
+    };
+  });
+}
+
+function selectGitHubResearchSearches(
+  searchPlan: GitHubResearchSearchPlan[],
+  cachedSearchResults: Map<string, GitHubSearchResult>,
+  searchId?: string,
+): GitHubResearchSearchPlan[] {
+  if (searchId) {
+    const selectedSearch = searchPlan.find((search) => search.id === searchId);
+    if (!selectedSearch) {
+      throw new Error(`unknown github_research searchId: ${searchId}`);
+    }
+    return [selectedSearch];
+  }
+
+  const pendingSearches = searchPlan.filter((search) => !cachedSearchResults.has(search.id));
+  if (pendingSearches.length > 0) {
+    return pendingSearches;
+  }
+
+  return searchPlan;
+}
+
+function describeSearchPlan(searchPlan: GitHubResearchSearchPlan[]): string {
+  if (searchPlan.length === 1 && searchPlan[0]) {
+    return describeSearchTarget(searchPlan[0]);
+  }
+
+  return `${searchPlan.length}-search plan`;
+}
+
+function describeSearchTarget(search: GitHubResearchSearchPlan): string {
+  return search.repo ?? search.owner ?? 'global-github';
 }
 
 async function cleanupCopilotResources(
