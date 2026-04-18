@@ -1,6 +1,6 @@
 # obs-service-handler
 
-`obs-service-handler` 是從 `orangepi3` 目前正在運作的 Obsidian sync 背景服務匯出的可部署快照，目的是把 `ob sync --continuous` 相關的 user-level systemd unit、helper script、incident log hardening 與部署文件集中管理。
+`obs-service-handler` 是一份可部署的 Obsidian sync 背景服務快照，目的是把 `ob sync --continuous` 相關的 user-level systemd unit、helper script、incident log hardening 與部署文件集中管理。
 
 ## 目錄結構
 
@@ -32,9 +32,7 @@
 - `~/.config/obsidian-headless/sync/<vault-id>/config.json`
 - 若要啟用 Git backup，還需要可用的 GitHub SSH key / repo 權限
 
-目前 `orangepi3` 上的 `ob` 位置是：
-
-- `/home/haman/.nvm/versions/node/v22.20.0/bin/ob`
+腳本預設會從目前登入使用者的 `PATH` 與 `~/.nvm/versions/node/*/bin/` 自動尋找 `ob`；若要固定指定，也可以在環境變數裡覆蓋 `OB_BIN`。
 
 ## 部署方式
 
@@ -60,7 +58,7 @@
 
 incident log 會寫到：
 
-- `~/.picoclaw/workspace/ob-log/`
+- `~/.local/state/obsidian-automation/incidents/`
 
 ## 目前 hardening 行為
 
@@ -85,13 +83,8 @@ incident log 會寫到：
 
 ## 實機部署備註
 
-目前 `orangepi3` 的有效 vault path 是：
-
-- `/home/haman/.picoclaw/workspace/notes`
-
-目前 `orangepi3` 的 source-of-truth sync config 是：
-
-- `/home/haman/.config/obsidian-headless/sync/cd1f2e7aef3c5227a8fc0c74b13808f9/config.json`
+- helper scripts 不再寫死 `/home/haman`；它們會依目前使用者的 `HOME`、`PATH`、以及 `~/.config/obsidian-headless/sync/*/config.json` 自動解析 runtime 路徑
+- `obsidian_git_backup.sh` 若未手動指定 `VAULT_PATH`，也會直接沿用 sync config 的 `vaultPath`
 
 另外，這輪維運過程也確認 `serialwrap` 在日常操作下仍可能掉到 `ATTACHED/PROMPT_TIMEOUT`；相關追蹤已開在：
 

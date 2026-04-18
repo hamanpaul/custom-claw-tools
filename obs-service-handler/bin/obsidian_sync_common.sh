@@ -1,12 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOME_DIR="/home/haman"
-export HOME="${HOME:-$HOME_DIR}"
-export PATH="$HOME_DIR/.local/bin:$HOME_DIR/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin"
+resolve_home_dir() {
+  if [ -n "${HOME:-}" ]; then
+    printf '%s\n' "$HOME"
+    return 0
+  fi
+  getent passwd "$(id -un)" 2>/dev/null | awk -F: 'NR==1 {print $6}'
+}
+
+build_runtime_path() {
+  local nvm_root="$HOME_DIR/.nvm/versions/node"
+  local paths=("$HOME_DIR/.local/bin")
+  if [ -d "$nvm_root" ]; then
+    while IFS= read -r candidate; do
+      paths+=("$candidate")
+    done < <(find "$nvm_root" -mindepth 2 -maxdepth 2 -type d -name bin 2>/dev/null | sort -r)
+  fi
+  paths+=("/usr/local/bin" "/usr/bin" "/bin")
+  local IFS=:
+  printf '%s' "${paths[*]}"
+}
+
+HOME_DIR="$(resolve_home_dir)"
+export HOME="$HOME_DIR"
+export PATH="$(build_runtime_path):${PATH:-}"
 
 STATE_DIR="${STATE_DIR:-$HOME/.local/state/obsidian-automation}"
-INCIDENT_DIR="${INCIDENT_DIR:-$HOME/.picoclaw/workspace/ob-log}"
+INCIDENT_DIR="${INCIDENT_DIR:-$STATE_DIR/incidents}"
 SYNC_ROOT="${SYNC_ROOT:-$HOME/.config/obsidian-headless/sync}"
 AUTH_TOKEN_PATH="${AUTH_TOKEN_PATH:-$HOME/.config/obsidian-headless/auth_token}"
 TERMINAL_STOP_FILE="${TERMINAL_STOP_FILE:-$STATE_DIR/obsidian-sync-terminal-stop.json}"

@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOME_DIR="/home/haman"
-export HOME="$HOME_DIR"
-export PATH="$HOME_DIR/.local/bin:$HOME_DIR/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin"
-
-source "$HOME_DIR/.local/bin/obsidian_sync_common.sh"
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/obsidian_sync_common.sh"
 
 CONFIG_DIR="${CONFIG_DIR:-.obsidian}"
 LOG_PATH="${LOG_PATH:-$STATE_DIR/obsidian-sync-guard.log}"
 FLOCK_PATH="${FLOCK_PATH:-$STATE_DIR/obsidian-sync-guard.flock}"
-OB_BIN="${OB_BIN:-$HOME/.nvm/versions/node/v22.20.0/bin/ob}"
+OB_BIN="${OB_BIN:-}"
+OB_NODE_BIN="${OB_NODE_BIN:-}"
 STALE_LOCK_SECS="${STALE_LOCK_SECS:-15}"
 PRESTART_HANDOFF_WAIT_SECS="${PRESTART_HANDOFF_WAIT_SECS:-20}"
 PRESTART_POLL_INTERVAL_SECS="${PRESTART_POLL_INTERVAL_SECS:-2}"
@@ -25,13 +23,22 @@ if ! flock -n 9; then
   exit 0
 fi
 
-if [ ! -x "$OB_BIN" ]; then
+if [ -n "${OB_BIN:-}" ] && [ ! -x "$OB_BIN" ]; then
+  OB_BIN=""
+fi
+if [ -z "${OB_BIN:-}" ]; then
   OB_BIN="$(command -v ob || true)"
 fi
 if [ -z "${OB_BIN:-}" ] || [ ! -x "$OB_BIN" ]; then
   write_incident_log 'ob-binary-missing' terminal_config
   set_terminal_stop_flag 'ob-binary-missing' terminal_config 'ob binary not found'
   exit "$TERMINAL_CONFIG_RC"
+fi
+if [ -z "${OB_NODE_BIN:-}" ]; then
+  candidate_node="$(dirname "$OB_BIN")/node"
+  if [ -x "$candidate_node" ]; then
+    OB_NODE_BIN="$candidate_node"
+  fi
 fi
 
 if ! resolve_sync_config; then
@@ -90,7 +97,11 @@ TMP_OUTPUT="$(mktemp)"
 trap 'rm -f "$TMP_OUTPUT" "$RUNNER_PID_FILE"' EXIT
 
 log "starting continuous sync for $LOADED_VAULT_PATH"
-"$OB_BIN" sync --continuous --path "$LOADED_VAULT_PATH" > >(tee -a "$TMP_OUTPUT") 2>&1 &
+if [ -n "${OB_NODE_BIN:-}" ]; then
+  "$OB_NODE_BIN" "$OB_BIN" sync --continuous --path "$LOADED_VAULT_PATH" > >(tee -a "$TMP_OUTPUT") 2>&1 &
+else
+  "$OB_BIN" sync --continuous --path "$LOADED_VAULT_PATH" > >(tee -a "$TMP_OUTPUT") 2>&1 &
+fi
 RUNNER_PID=$!
 printf '%s
 ' "$RUNNER_PID" >"$RUNNER_PID_FILE"
@@ -121,4 +132,3 @@ case "$classification" in
     exit "${rc:-75}"
     ;;
 esac
-

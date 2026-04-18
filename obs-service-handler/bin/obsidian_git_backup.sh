@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOME_DIR="/home/haman"
-export HOME="$HOME_DIR"
-export PATH="$HOME_DIR/.local/bin:$HOME_DIR/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin"
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/obsidian_sync_common.sh"
+
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new}"
 
-VAULT_PATH="${VAULT_PATH:-$HOME/.picoclaw/workspace/notes}"
+HOST_LABEL="${HOST_LABEL:-$(hostname -s 2>/dev/null || echo local-host)}"
+VAULT_PATH="${VAULT_PATH:-}"
 GIT_DIR_PATH="${GIT_DIR_PATH:-$HOME/.local/share/obsidian-vault-backup.git}"
 REMOTE_URL="${REMOTE_URL:-git@github-obsidian-backup:hamanpaul/obsidian_vault.git}"
 BRANCH_NAME="${BRANCH_NAME:-main}"
@@ -14,7 +15,7 @@ STATE_DIR="${STATE_DIR:-$HOME/.local/state/obsidian-automation}"
 LOG_PATH="${LOG_PATH:-$STATE_DIR/obsidian-git-backup.log}"
 BOOTSTRAP_FORCE_PUSH="${BOOTSTRAP_FORCE_PUSH:-yes}"
 GIT_USER_NAME="${GIT_USER_NAME:-$(git config --global user.name 2>/dev/null || echo haman)}"
-GIT_USER_EMAIL="${GIT_USER_EMAIL:-$(git config --global user.email 2>/dev/null || echo haman@orangepi3.local)}"
+GIT_USER_EMAIL="${GIT_USER_EMAIL:-$(git config --global user.email 2>/dev/null || echo "$(id -un)@$HOST_LABEL.local")}"
 NO_CHANGES_RC=10
 
 mkdir -p "$STATE_DIR" "$(dirname "$GIT_DIR_PATH")"
@@ -25,6 +26,18 @@ log() { printf '[%s] %s
 die() { log "ERROR: $*"; exit 1; }
 git_vault() { git --git-dir="$GIT_DIR_PATH" --work-tree="$VAULT_PATH" "$@"; }
 
+resolve_vault_path() {
+  if [ -n "${VAULT_PATH:-}" ]; then
+    return 0
+  fi
+  if ! resolve_sync_config; then
+    die "could not resolve sync config: ${RESOLVE_SYNC_CONFIG_ERROR:-unknown}"
+  fi
+  VAULT_PATH="$LOADED_VAULT_PATH"
+}
+
+[ -d "$HOME" ] || die "home path missing: $HOME"
+resolve_vault_path
 [ -d "$VAULT_PATH" ] || die "vault path missing: $VAULT_PATH"
 command -v git >/dev/null 2>&1 || die "git not found"
 command -v ssh >/dev/null 2>&1 || die "ssh not found"
@@ -124,7 +137,7 @@ commit_changes() {
   fi
 
   log "creating backup commit at $ts"
-  if ! git_vault commit     -m "backup: vault snapshot $ts"     -m "Automated backup from COM1/opi after Obsidian Sync."     -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"; then
+  if ! git_vault commit     -m "backup: vault snapshot $ts"     -m "Automated backup from $HOST_LABEL after Obsidian Sync."     -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"; then
     return 30
   fi
 }
@@ -137,7 +150,7 @@ push_changes() {
   fi
 
   if [ -n "$remote_head" ] && [ "$BOOTSTRAP_FORCE_PUSH" = "yes" ] && { [ "$bootstrap" = "1" ] || ! has_upstream; }; then
-    log "force-aligning remote $BRANCH_NAME from COM1 bootstrap"
+    log "force-aligning remote $BRANCH_NAME from local bootstrap"
     git_vault push --force-with-lease="$BRANCH_NAME:$remote_head" -u origin "$BRANCH_NAME"
     return 0
   fi

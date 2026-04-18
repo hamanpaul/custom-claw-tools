@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOME_DIR="/home/haman"
-export HOME="$HOME_DIR"
-export PATH="$HOME_DIR/.local/bin:$HOME_DIR/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin"
-
-source "$HOME_DIR/.local/bin/obsidian_sync_common.sh"
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/obsidian_sync_common.sh"
 
 SYNC_UNIT="${SYNC_UNIT:-obsidian-sync.service}"
 CONFIG_DIR="${CONFIG_DIR:-.obsidian}"
