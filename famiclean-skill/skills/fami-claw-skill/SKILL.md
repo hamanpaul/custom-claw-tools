@@ -45,8 +45,10 @@ python scripts/famiclean.py check-threshold
   - `read-temp` -> `get-temp`
   - `water-temp` -> `get-temp`
   - `read-gas` -> `get-total-gas`
+  - `gas-status` -> `get-total-gas`
   - `remaining-gas` -> `get-total-gas`
   - `set-temperature` -> `set-temp`
+- When `--env-file` is omitted, the wrapper prefers `FAMICLEAN_ENV_FILE`, then `~/.config/fami-ghome-live/.env`, before falling back to the project-local `config/.env`.
 - When changing temperature, always follow with a read (`read-temp` / `get-temp`) and report the confirmed value.
 - When the user asks for 剩餘瓦斯量, run `read-gas` / `get-total-gas` and answer with `remaining_to_next_threshold_m3`.
 

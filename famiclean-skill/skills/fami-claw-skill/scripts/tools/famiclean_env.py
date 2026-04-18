@@ -17,6 +17,7 @@ class FamicleanSettings:
     timeout_seconds: float = 1.5
     gas_divisor: float = 9100.0
     threshold_step_m3: int = 20
+    warning_remaining_m3: float = 3.0
     daily_check_hour: int = 8
     timezone: str = "Asia/Taipei"
     max_temp_celsius: int = 50
@@ -133,6 +134,7 @@ def load_settings(script_path: Path, env_file: str | None = None, explicit_home:
         timeout_seconds=_as_float(values.get("FAMICLEAN_TIMEOUT_SECONDS"), 1.5),
         gas_divisor=_as_float(values.get("GAS_DIVISOR"), 9100.0),
         threshold_step_m3=_as_int(values.get("THRESHOLD_STEP_M3"), 20),
+        warning_remaining_m3=_as_float(values.get("WARNING_REMAINING_M3"), 3.0),
         daily_check_hour=_as_int(values.get("DAILY_CHECK_HOUR"), 8),
         timezone=values.get("TIMEZONE", "Asia/Taipei"),
         max_temp_celsius=_as_int(values.get("MAX_TEMP_CELSIUS"), 50),

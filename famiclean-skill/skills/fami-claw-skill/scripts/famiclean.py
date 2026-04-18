@@ -47,21 +47,51 @@ def text_print_set_temp(result: dict[str, object]) -> None:
     print(f"設備: {result['device']['ip']} / {result['device']['mac']}")
 
 
-def build_threshold_message(result: dict[str, object]) -> tuple[str, str]:
+def classify_threshold_message(result: dict[str, object], *, warning_remaining_m3: float) -> dict[str, str]:
+    crossed = result.get("crossed_thresholds_m3", [])
+    remaining = float(result["remaining_to_next_threshold_m3"])
+    if len(crossed) > 1:
+        return {
+            "level": "warning",
+            "reason": "multi_threshold_jump",
+            "headline": "警告：本次檢查內已跨越多個瓦斯門檻",
+        }
+    if remaining <= warning_remaining_m3:
+        return {
+            "level": "warning",
+            "reason": "approaching_next_threshold",
+            "headline": "警告：瓦斯用量已接近下一個門檻",
+        }
+    return {
+        "level": "notification",
+        "reason": "threshold_crossed",
+        "headline": "通知：瓦斯用量已跨越例行門檻",
+    }
+
+
+def build_threshold_message(result: dict[str, object], *, warning_remaining_m3: float) -> tuple[str, str, dict[str, str]]:
     crossed = result.get("crossed_thresholds_m3", [])
     crossed_text = ", ".join(f"{item} M3" for item in crossed) if crossed else "無"
-    subject = "Famiclean 瓦斯用量通知"
-    message = "\n".join(
-        [
-            "瓦斯用量已達臨界值",
-            f"目前總瓦斯用量: {result['gas_total_m3']:.2f} M3",
-            f"目前整數門檻: {result['current_threshold_m3']} M3",
-            f"本次跨越門檻: {crossed_text}",
-            f"設備: {result['device']['ip']} / {result['device']['mac']}",
-            f"檢查時間: {result['checked_at']}",
-        ]
-    )
-    return subject, message
+    classification = classify_threshold_message(result, warning_remaining_m3=warning_remaining_m3)
+    subject_label = "警告" if classification["level"] == "warning" else "通知"
+    lines = [
+        classification["headline"],
+        f"目前總瓦斯用量: {result['gas_total_m3']:.2f} M3",
+        f"目前整數門檻: {result['current_threshold_m3']} M3",
+        f"本次跨越門檻: {crossed_text}",
+        f"距離下一個門檻: {result['remaining_to_next_threshold_m3']:.2f} M3",
+        f"設備: {result['device']['ip']} / {result['device']['mac']}",
+        f"檢查時間: {result['checked_at']}",
+    ]
+    if classification["reason"] == "multi_threshold_jump":
+        lines.insert(1, "原因: 兩次檢查之間累積跨越多個門檻")
+    elif classification["reason"] == "approaching_next_threshold":
+        lines.insert(
+            1,
+            f"原因: 距離下一個門檻僅剩 {result['remaining_to_next_threshold_m3']:.2f} M3",
+        )
+    subject = f"Famiclean 瓦斯用量{subject_label}"
+    return subject, "\n".join(lines), classification
 
 
 def run_check_threshold(settings, *, device_ip: str | None, device_mac: str | None, send_notifications: bool, force_notify: bool) -> dict[str, object]:
@@ -85,6 +115,9 @@ def run_check_threshold(settings, *, device_ip: str | None, device_mac: str | No
             "attempted": False,
             "success": False,
             "reason": None,
+            "level": None,
+            "classification_reason": None,
+            "subject": None,
             "details": None,
         },
         "state_file": str(settings.state_file),
@@ -111,12 +144,19 @@ def run_check_threshold(settings, *, device_ip: str | None, device_mac: str | No
         result["notification"]["reason"] = "no_new_threshold"
         return result
 
+    subject, message, classification = build_threshold_message(
+        result,
+        warning_remaining_m3=settings.warning_remaining_m3,
+    )
+    result["notification"]["level"] = classification["level"]
+    result["notification"]["classification_reason"] = classification["reason"]
+    result["notification"]["subject"] = subject
+
     if not send_notifications:
         result["notification"]["reason"] = "notification_suppressed"
         save_state(settings.state_file, state)
         return result
 
-    subject, message = build_threshold_message(result)
     details = dispatch_notifications(settings, subject, message)
     result["notification"]["attempted"] = True
     result["notification"]["details"] = details
@@ -237,6 +277,7 @@ def main() -> int:
             else:
                 text_print_total_gas(result)
                 print(f"目前門檻: {result['current_threshold_m3']} M3")
+                print(f"訊息等級: {result['notification']['level'] or 'n/a'}")
                 print(f"通知狀態: {result['notification']['reason']}")
             return 0
 

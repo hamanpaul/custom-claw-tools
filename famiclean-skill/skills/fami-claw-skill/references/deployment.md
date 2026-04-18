@@ -24,7 +24,7 @@ install -m 644 skills/fami-claw-skill/SKILL.md ~/.picoclaw/workspace/skills/fami
 ln -sfn ~/.picoclaw/workspace/skills/fami-claw-skill/fami-claw ~/.picoclaw/workspace/bin/fami-claw
 ```
 
-The wrapper defaults to `--json` and accepts PicoClaw-friendly aliases such as `read-temp`, `read-gas`, and `set-temperature`.
+The wrapper defaults to `--json`, accepts PicoClaw-friendly aliases such as `read-temp`, `read-gas`, `gas-status`, and `set-temperature`, and when `--env-file` is omitted it prefers `FAMICLEAN_ENV_FILE` / `~/.config/fami-ghome-live/.env` before falling back to the project-local `config/.env`.
 
 ## Required configuration
 

@@ -45,6 +45,7 @@ class LoadSettingsTests(unittest.TestCase):
                         "LINE_TARGET_USER_IDS=U123,U456",
                         "LINE_BOT_USER_ID=Ubottest",
                         "LINE_BOT_BASIC_ID=@botid",
+                        "WARNING_REMAINING_M3=1.5",
                     ]
                 ),
                 encoding="utf-8",
@@ -56,6 +57,7 @@ class LoadSettingsTests(unittest.TestCase):
             self.assertEqual(settings.line_target_user_ids, ("U123", "U456"))
             self.assertEqual(settings.line_bot_user_id, "Ubottest")
             self.assertEqual(settings.line_bot_basic_id, "@botid")
+            self.assertEqual(settings.warning_remaining_m3, 1.5)
 
 
 class DispatchNotificationsTests(unittest.TestCase):

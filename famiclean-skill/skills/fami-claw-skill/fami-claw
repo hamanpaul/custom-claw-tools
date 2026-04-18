@@ -7,7 +7,6 @@ from pathlib import Path
 
 
 SKILL_NAME = "fami-claw-skill"
-DEFAULT_HOME = Path("/home/haman/custom-claw-tools/famiclean-skill")
 VALUE_OPTIONS = {
     "--home",
     "--env-file",
@@ -31,6 +30,7 @@ COMMAND_ALIASES = {
     "remaining-gas-amount": "get-total-gas",
     "total-gas": "get-total-gas",
     "gas": "get-total-gas",
+    "gas-status": "get-total-gas",
     "usage": "get-total-gas",
     "set-temperature": "set-temp",
     "threshold-check": "check-threshold",
@@ -43,7 +43,8 @@ def iter_candidate_homes(wrapper_path: Path) -> list[Path]:
     if env_home:
         candidates.append(Path(env_home).expanduser())
     candidates.append(wrapper_path.resolve().parent.parent.parent)
-    candidates.append(DEFAULT_HOME)
+    candidates.append(Path.home() / "custom-claw-tools" / "famiclean-skill")
+    candidates.append(Path("/home/haman/custom-claw-tools/famiclean-skill"))
     return candidates
 
 
@@ -59,7 +60,7 @@ def resolve_runtime(wrapper_path: Path) -> tuple[Path, Path]:
             return home, cli_path
     raise SystemExit(
         "Unable to locate famiclean.py. Set FAMICLEAN_HOME or install the project "
-        f"at {DEFAULT_HOME}."
+        "under either ~/custom-claw-tools/famiclean-skill or /home/haman/custom-claw-tools/famiclean-skill."
     )
 
 
@@ -91,11 +92,43 @@ def normalize_args(raw_args: list[str]) -> list[str]:
     return args
 
 
+def iter_candidate_env_files() -> list[Path]:
+    candidates: list[Path] = []
+    env_file = os.environ.get("FAMICLEAN_ENV_FILE")
+    if env_file:
+        candidates.append(Path(env_file).expanduser())
+    candidates.append(Path.home() / ".config" / "fami-ghome-live" / ".env")
+    candidates.append(Path("/home/appuser/.config/fami-ghome-live/.env"))
+    candidates.append(Path("/home/haman/.config/fami-ghome-live/.env"))
+    return candidates
+
+
+def resolve_default_env_file() -> Path | None:
+    seen: set[Path] = set()
+    for candidate in iter_candidate_env_files():
+        resolved = candidate.expanduser().resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.is_file():
+            return resolved
+    return None
+
+
+def apply_runtime_defaults(home: Path, args: list[str]) -> list[str]:
+    resolved_args = list(args)
+    if "--home" not in resolved_args:
+        resolved_args = ["--home", str(home), *resolved_args]
+    if "--env-file" not in resolved_args:
+        default_env_file = resolve_default_env_file()
+        if default_env_file is not None:
+            resolved_args = ["--env-file", str(default_env_file), *resolved_args]
+    return resolved_args
+
+
 def main() -> int:
     home, cli_path = resolve_runtime(Path(__file__))
-    forward_args = normalize_args(sys.argv[1:])
-    if "--home" not in forward_args:
-        forward_args = ["--home", str(home), *forward_args]
+    forward_args = apply_runtime_defaults(home, normalize_args(sys.argv[1:]))
     os.execv(sys.executable, [sys.executable, str(cli_path), *forward_args])
     return 0
 

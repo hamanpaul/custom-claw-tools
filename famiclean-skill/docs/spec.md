@@ -171,11 +171,23 @@ PicoClaw wrapper contract：
 
 ### 4.8 Notification rule
 
+送出條件不變：
+
+- 仍只在 `check-threshold` 偵測到新跨越門檻時送出
+- `--force-notify` 仍可手動強制送出
+
+訊息等級需區分：
+
+- 一般跨越門檻時使用 `通知`
+- 若兩次檢查之間一次跨越多個門檻，改用 `警告`
+- 若距離下一個門檻小於等於 `WARNING_REMAINING_M3`，改用 `警告`
+
 通知文案至少包含：
 
-- `瓦斯用量已達臨界值`
+- `通知` 或 `警告` 標頭
 - 目前總瓦斯用量
 - 本次跨越門檻
+- 距離下一個門檻
 - 設備 IP / MAC
 - 檢查時間
 
@@ -207,6 +219,7 @@ PicoClaw wrapper contract：
 - `FAMICLEAN_TIMEOUT_SECONDS`
 - `GAS_DIVISOR`
 - `THRESHOLD_STEP_M3`
+- `WARNING_REMAINING_M3`
 - `DAILY_CHECK_HOUR`
 - `TIMEZONE`
 - `MAX_TEMP_CELSIUS`
