@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from http.client import HTTPConnection
@@ -52,9 +53,20 @@ class ParseMarkdownTextTest(unittest.TestCase):
 class BuildPicoclawDispatchPromptTest(unittest.TestCase):
     def test_prompt_demands_real_json_block_not_placeholder(self) -> None:
         prompt = build_picoclaw_dispatch_prompt(
+            handoff_path=Path("/tmp/handoff.json"),
             handoff_payload={
                 "job_id": "root-note-20260331060000-feedface",
-                "entries": [],
+                "vault_path": "/tmp/vault",
+                "ruleset": {
+                    "source": "ObsToolsVault/README.md",
+                    "absolute_source_path": "/tmp/vault/ObsToolsVault/README.md",
+                },
+                "entries": [
+                    {
+                        "source_path": "root-note/demo.md",
+                        "source_text": "THIS BODY SHOULD NOT BE INLINED",
+                    }
+                ],
             },
             callback_endpoint="http://127.0.0.1:43120/picoclaw/report",
         )
@@ -62,6 +74,9 @@ class BuildPicoclawDispatchPromptTest(unittest.TestCase):
         self.assertIn("不要輸出 `{...json report...}`", prompt)
         self.assertIn('PICOCLAW_REPORT_BEGIN\n{"job_id":"<job_id>"', prompt)
         self.assertIn("每一個 entry 都必須在 report entries[] 中剛好出現一次", prompt)
+        self.assertIn("handoff artifact: `/tmp/handoff.json`", prompt)
+        self.assertIn("ruleset source: `ObsToolsVault/README.md`", prompt)
+        self.assertNotIn("THIS BODY SHOULD NOT BE INLINED", prompt)
 
 
 class BuildPicoclawDispatchSessionTest(unittest.TestCase):
@@ -214,6 +229,7 @@ class RootNotePipelineTest(unittest.TestCase):
             self.assertTrue(result.root_note_exists)
             self.assertEqual(result.scanned_files, 1)
             self.assertEqual(result.handed_off_files, 1)
+            self.assertEqual(result.deferred_files, 0)
             self.assertIsNotNone(result.job_id)
             self.assertIsNotNone(result.handoff_path)
 
@@ -223,16 +239,100 @@ class RootNotePipelineTest(unittest.TestCase):
             self.assertEqual(handoff_payload["ruleset"]["source"], "ObsToolsVault/README.md")
             self.assertEqual(handoff_payload["callback_contract"]["endpoint"], "http://127.0.0.1:45460/picoclaw-report")
             self.assertEqual(handoff_payload["entries"][0]["source_path"], "root-note/entry.md")
-            self.assertEqual(handoff_payload["vault_path"], str(vault_path))
-            self.assertEqual(handoff_payload["destination_root_paths"]["TechVault"], str(vault_path / "TechVault"))
 
-            second_result = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T00:05:00+00:00")
-            self.assertEqual(second_result.handed_off_files, 0)
-            self.assertEqual(second_result.unchanged_files, 1)
+    def test_monitor_root_note_defers_entries_beyond_stage2_batch_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            root_note_path = vault_path / "root-note"
+            config_dir.mkdir(parents=True)
+            root_note_path.mkdir(parents=True)
+            (vault_path / "TechVault").mkdir(parents=True)
+            (vault_path / "WorkVault").mkdir(parents=True)
+            (vault_path / "PersonalVault").mkdir(parents=True)
+            (config_dir / "config.json").write_text(json.dumps({"vaultPath": str(vault_path)}), encoding="utf-8")
+            (root_note_path / "entry-a.md").write_text("---\ntitle: A\n---\na\n", encoding="utf-8")
+            (root_note_path / "entry-b.md").write_text("---\ntitle: B\n---\nb\n", encoding="utf-8")
 
-            third_result = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T02:05:00+00:00")
-            self.assertEqual(third_result.handed_off_files, 1)
-            self.assertEqual(third_result.unchanged_files, 0)
+            with patch.dict(os.environ, {"OBS_AUTO_MOC_STAGE2_MAX_ENTRIES": "1"}, clear=False):
+                result = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T00:00:00+00:00")
+
+                self.assertEqual(result.scanned_files, 2)
+                self.assertEqual(result.handed_off_files, 1)
+                self.assertEqual(result.unchanged_files, 0)
+                self.assertEqual(result.deferred_files, 1)
+
+                handoff_payload = json.loads(result.handoff_path.read_text(encoding="utf-8"))
+                self.assertEqual(len(handoff_payload["entries"]), 1)
+                self.assertEqual(handoff_payload["entries"][0]["source_path"], "root-note/entry-a.md")
+
+                state_payload = json.loads((vault_path / "claw" / "moc" / "pipeline" / "root-note-state.json").read_text(encoding="utf-8"))
+                self.assertEqual(list(state_payload["entries"].keys()), ["root-note/entry-a.md"])
+                self.assertEqual(handoff_payload["vault_path"], str(vault_path))
+                self.assertEqual(handoff_payload["destination_root_paths"]["TechVault"], str(vault_path / "TechVault"))
+
+                second_result = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T00:05:00+00:00")
+                self.assertEqual(second_result.handed_off_files, 1)
+                self.assertEqual(second_result.unchanged_files, 1)
+                self.assertEqual(second_result.deferred_files, 0)
+
+                third_result = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T02:05:00+00:00")
+                self.assertEqual(third_result.handed_off_files, 1)
+                self.assertEqual(third_result.unchanged_files, 0)
+                self.assertEqual(third_result.deferred_files, 1)
+
+    def test_monitor_root_note_archives_already_processed_source_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            root_note_path = vault_path / "root-note"
+            pipeline_root = vault_path / "claw" / "moc" / "pipeline"
+            config_dir.mkdir(parents=True)
+            root_note_path.mkdir(parents=True)
+            (vault_path / "TechVault").mkdir(parents=True)
+            (vault_path / "WorkVault").mkdir(parents=True)
+            (vault_path / "PersonalVault").mkdir(parents=True)
+            (config_dir / "config.json").write_text(json.dumps({"vaultPath": str(vault_path)}), encoding="utf-8")
+
+            source_file = root_note_path / "entry.md"
+            source_text = "---\ntitle: Entry\n---\nbody\n"
+            source_file.write_text(source_text, encoding="utf-8")
+            fingerprint = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T00:00:00+00:00").handoff_path
+            assert fingerprint is not None
+            handoff_payload = json.loads(fingerprint.read_text(encoding="utf-8"))
+            pipeline_root.mkdir(parents=True, exist_ok=True)
+            (pipeline_root / "root-note-state.json").write_text(
+                json.dumps(
+                    {
+                        "entries": {
+                            "root-note/entry.md": {
+                                "fingerprint": handoff_payload["entries"][0]["fingerprint"],
+                                "status": "processed",
+                                "destinations": ["TechVault"],
+                                "last_job_id": "root-note-20260331000000-deadbeef",
+                                "updated_at": "2026-03-31T00:10:00+00:00",
+                                "last_report_path": str(pipeline_root / "picoclaw-completions" / "root-note-20260331000000-deadbeef.json"),
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            result = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T00:20:00+00:00")
+
+            self.assertEqual(result.handed_off_files, 0)
+            self.assertEqual(result.unchanged_files, 1)
+            self.assertFalse(source_file.exists())
+            archived_source = pipeline_root / "root-note-archive" / "processed" / "root-note-20260331000000-deadbeef" / "root-note" / "entry.md"
+            self.assertTrue(archived_source.exists())
+            self.assertEqual(archived_source.read_text(encoding="utf-8"), source_text)
 
     def test_apply_picoclaw_report_refreshes_only_touched_destination_mocs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -311,6 +411,12 @@ class RootNotePipelineTest(unittest.TestCase):
             self.assertEqual(result.touched_destination_vaults, ["TechVault"])
             self.assertIn("TechVault", result.destination_mocs)
             self.assertNotIn("WorkVault", result.destination_mocs)
+            self.assertFalse(root_note_file.exists())
+            self.assertEqual(len(result.archived_source_paths), 1)
+            archived_source = Path(result.archived_source_paths[0])
+            self.assertTrue(archived_source.exists())
+            self.assertEqual(archived_source.read_text(encoding="utf-8"), source_text)
+            self.assertIn("/root-note-archive/processed/", result.archived_source_paths[0])
 
             tech_moc_text = (tech_path / "MOC.md").read_text(encoding="utf-8")
             self.assertIn("# TechVault MOC", tech_moc_text)
@@ -419,6 +525,8 @@ class RootNotePipelineTest(unittest.TestCase):
             self.assertEqual(result.processed_count, 0)
             self.assertEqual(result.failed_count, 1)
             self.assertTrue(result.archived_report_path.exists())
+            self.assertTrue((root_note_path / "entry.md").exists())
+            self.assertEqual(result.archived_source_paths, [])
             state_payload = json.loads(result.state_path.read_text(encoding="utf-8"))
             self.assertEqual(state_payload["entries"]["root-note/entry.md"]["status"], "failed")
             self.assertIn("missing destination note", state_payload["entries"]["root-note/entry.md"]["last_error"])
@@ -711,7 +819,7 @@ class RootNotePipelineTest(unittest.TestCase):
             self.assertTrue(Path(result.handoff_path).exists())
 
             state_payload = json.loads(result.state_path.read_text(encoding="utf-8"))
-            self.assertEqual(state_payload["entries"]["root-note/entry.md"]["status"], "handed_off_to_picoclaw")
+            self.assertEqual(state_payload["entries"]["root-note/entry.md"]["status"], "handed_off_to_stage2")
             self.assertNotEqual(state_payload["entries"]["root-note/entry.md"]["last_job_id"], first_monitor.job_id)
 
     def test_dispatch_handoff_to_picoclaw_runs_agent_and_queues_report(self) -> None:
@@ -774,15 +882,91 @@ class RootNotePipelineTest(unittest.TestCase):
                 )
 
             command = run.call_args[0][0]
-            session_value = command[command.index("--session") + 1]
+            session_value = command[command.index("--session-id") + 1]
             self.assertEqual(result.job_id, handoff.job_id)
+            self.assertEqual(command[0], "/usr/local/bin/openclaw")
             self.assertEqual(session_value, f"cron:obs-auto-moc:{handoff.job_id}")
+            self.assertIn(str(handoff.handoff_path), command[command.index("--message") + 1])
+            self.assertNotIn('"source_text"', command[command.index("--message") + 1])
             self.assertTrue(result.raw_output_log_path.exists())
             self.assertTrue(result.report_copy_path.exists())
             self.assertFalse(result.queued_report_path.exists())
             self.assertIsNotNone(result.pipeline_result)
             self.assertEqual(result.pipeline_result["reports_applied"], 1)
             self.assertTrue((tech_path / "MOC.md").exists())
+
+    def test_dispatch_handoff_to_picoclaw_reads_new_stage2_env_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            sync_root = root / "sync"
+            config_dir = sync_root / "vault-id"
+            vault_path = root / "notes"
+            root_note_path = vault_path / "root-note"
+            tech_path = vault_path / "TechVault"
+            config_dir.mkdir(parents=True)
+            root_note_path.mkdir(parents=True)
+            tech_path.mkdir(parents=True)
+            (vault_path / "WorkVault").mkdir(parents=True)
+            (vault_path / "PersonalVault").mkdir(parents=True)
+            (config_dir / "config.json").write_text(json.dumps({"vaultPath": str(vault_path)}), encoding="utf-8")
+            (root_note_path / "entry.md").write_text("---\ntitle: Inbox\n---\nbody\n", encoding="utf-8")
+            handoff = monitor_root_note(sync_root=sync_root, generated_at="2026-03-31T06:00:00+00:00")
+            handoff_payload = json.loads(handoff.handoff_path.read_text(encoding="utf-8"))
+            (tech_path / "atomic.md").write_text("---\ntitle: Atomic\n---\nbody\n", encoding="utf-8")
+
+            report_payload = {
+                "job_id": handoff.job_id,
+                "reported_by": "PicoClaw",
+                "completed_at": "2026-03-31T06:05:00+00:00",
+                "entries": [
+                    {
+                        "source_path": "root-note/entry.md",
+                        "fingerprint": handoff_payload["entries"][0]["fingerprint"],
+                        "status": "processed",
+                        "outputs": [
+                            {
+                                "destination_vault": "TechVault",
+                                "note_path": "TechVault/atomic.md",
+                            }
+                        ],
+                    }
+                ],
+            }
+            agent_output = (
+                "PICOCLAW_REPORT_BEGIN\n"
+                + json.dumps(report_payload, ensure_ascii=False, indent=2)
+                + "\nPICOCLAW_REPORT_END\n"
+            )
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "OBS_AUTO_MOC_STAGE2_BIN": "/tmp/custom-openclaw",
+                        "OBS_AUTO_MOC_STAGE2_SESSION": "custom-stage2",
+                    },
+                    clear=False,
+                ),
+                patch("obs_auto_moc.engine.subprocess.run") as run,
+            ):
+                run.return_value = type(
+                    "CompletedProcess",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": agent_output,
+                        "stderr": "",
+                    },
+                )()
+                dispatch_handoff_to_picoclaw(
+                    handoff_path=handoff.handoff_path,
+                    sync_root=sync_root,
+                    run_pipeline=False,
+                )
+
+            command = run.call_args[0][0]
+            self.assertEqual(command[0], "/tmp/custom-openclaw")
+            self.assertEqual(command[command.index("--session-id") + 1], f"custom-stage2:{handoff.job_id}")
 
     def test_dispatch_handoff_to_picoclaw_pads_missing_entries_as_failed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -915,7 +1099,7 @@ class RootNotePipelineTest(unittest.TestCase):
             self.assertTrue((tech_path / "entry-a.md").exists())
             self.assertTrue((tech_path / "entry-b.md").exists())
 
-    def test_dispatch_handoff_to_picoclaw_surfaces_invalid_report_log_path(self) -> None:
+    def test_dispatch_handoff_to_picoclaw_uses_local_fallback_when_report_markers_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             sync_root = root / "sync"
@@ -941,15 +1125,21 @@ class RootNotePipelineTest(unittest.TestCase):
                         "stderr": "",
                     },
                 )()
-                with self.assertRaisesRegex(RuntimeError, rf"see .*{handoff.job_id}\.agent\.log"):
-                    dispatch_handoff_to_picoclaw(
-                        handoff_path=handoff.handoff_path,
-                        sync_root=sync_root,
-                        run_pipeline=True,
-                    )
+                result = dispatch_handoff_to_picoclaw(
+                    handoff_path=handoff.handoff_path,
+                    sync_root=sync_root,
+                    run_pipeline=False,
+                )
 
             dispatch_log_path = vault_path / "claw" / "moc" / "pipeline" / "picoclaw-dispatch" / f"{handoff.job_id}.agent.log"
             self.assertTrue(dispatch_log_path.exists())
+            self.assertEqual(dispatch_log_path.read_text(encoding="utf-8"), "not a valid PicoClaw report\n")
+
+            queued_report = json.loads(result.queued_report_path.read_text(encoding="utf-8"))
+            self.assertEqual(queued_report["job_id"], handoff.job_id)
+            self.assertEqual(queued_report["reported_by"], "obs-auto-moc-fallback")
+            self.assertIn("missing PICOCLAW_REPORT_BEGIN", queued_report["entries"][0]["warnings"][0])
+            self.assertTrue((vault_path / "TechVault" / "entry.md").exists())
 
     def test_run_pipeline_once_auto_dispatches_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -984,6 +1174,7 @@ class RootNotePipelineTest(unittest.TestCase):
                             "handoff_path": "/tmp/next-handoff.json",
                             "handed_off_files": 0,
                             "unchanged_files": 1,
+                            "deferred_files": 0,
                         },
                     },
                 )()

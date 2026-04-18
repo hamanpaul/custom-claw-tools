@@ -6,28 +6,47 @@ PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")"/.. && pwd)"
 
 export PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export OBS_AUTO_MOC_AUTO_DISPATCH="${OBS_AUTO_MOC_AUTO_DISPATCH:-1}"
-export OBS_AUTO_MOC_PICOCLAW_SESSION="${OBS_AUTO_MOC_PICOCLAW_SESSION:-cron:obs-auto-moc}"
+export OBS_AUTO_MOC_STAGE2_SESSION="${OBS_AUTO_MOC_STAGE2_SESSION:-cron:obs-auto-moc}"
 
-ARGS=(python3 -m obs_auto_moc.cli run-pipeline-once)
+PIPELINE_ARGS=(python3 -m obs_auto_moc.cli run-pipeline-once)
 
 if [ "${OBS_AUTO_MOC_SYNC_ROOT:-}" != "" ]; then
-  ARGS+=(--sync-root "$OBS_AUTO_MOC_SYNC_ROOT")
+  PIPELINE_ARGS+=(--sync-root "$OBS_AUTO_MOC_SYNC_ROOT")
 fi
 
 if [ "${OBS_AUTO_MOC_VAULT_PATH:-}" != "" ]; then
-  ARGS+=(--vault-path "$OBS_AUTO_MOC_VAULT_PATH")
+  PIPELINE_ARGS+=(--vault-path "$OBS_AUTO_MOC_VAULT_PATH")
 fi
 
 if [ "${OBS_AUTO_MOC_ARTIFACTS_ROOT:-}" != "" ]; then
-  ARGS+=(--artifacts-root "$OBS_AUTO_MOC_ARTIFACTS_ROOT")
+  PIPELINE_ARGS+=(--artifacts-root "$OBS_AUTO_MOC_ARTIFACTS_ROOT")
 fi
 
 if [ "${OBS_AUTO_MOC_ROOT_NOTE_PATH:-}" != "" ]; then
-  ARGS+=(--root-note-path "$OBS_AUTO_MOC_ROOT_NOTE_PATH")
+  PIPELINE_ARGS+=(--root-note-path "$OBS_AUTO_MOC_ROOT_NOTE_PATH")
 fi
 
 if [ "${OBS_AUTO_MOC_PIPELINE_ROOT:-}" != "" ]; then
-  ARGS+=(--pipeline-root "$OBS_AUTO_MOC_PIPELINE_ROOT")
+  PIPELINE_ARGS+=(--pipeline-root "$OBS_AUTO_MOC_PIPELINE_ROOT")
 fi
 
-exec "${ARGS[@]}" "$@"
+"${PIPELINE_ARGS[@]}" "$@"
+
+COMMON_ARGS=()
+if [ "${OBS_AUTO_MOC_SYNC_ROOT:-}" != "" ]; then
+  COMMON_ARGS+=(--sync-root "$OBS_AUTO_MOC_SYNC_ROOT")
+fi
+if [ "${OBS_AUTO_MOC_VAULT_PATH:-}" != "" ]; then
+  COMMON_ARGS+=(--vault-path "$OBS_AUTO_MOC_VAULT_PATH")
+fi
+if [ "${OBS_AUTO_MOC_ARTIFACTS_ROOT:-}" != "" ]; then
+  COMMON_ARGS+=(--artifacts-root "$OBS_AUTO_MOC_ARTIFACTS_ROOT")
+fi
+
+if [ "${OBS_AUTO_MOC_RUN_WAKEUP:-0}" = "1" ]; then
+  python3 -m obs_auto_moc.cli wake-up "${COMMON_ARGS[@]}"
+fi
+
+if [ "${OBS_AUTO_MOC_RUN_DREAM:-0}" = "1" ]; then
+  python3 -m obs_auto_moc.cli dream "${COMMON_ARGS[@]}"
+fi

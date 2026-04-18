@@ -187,6 +187,90 @@ class CliPipelineCommandsTest(unittest.TestCase):
             self.assertEqual(cli.main(), 0)
             serve_loopback.assert_called_once()
 
+    def test_query_memory_dispatches(self) -> None:
+        payload = {
+            "generated_at": "2026-04-17T10:10:00+00:00",
+            "query": "memory",
+            "result_count": 1,
+            "memory_root": "/tmp/vault/claw/moc/memory",
+            "results": [{"note_path": "TechVault/atomic.md", "score": 10}],
+        }
+        with (
+            patch("sys.argv", ["obs-auto-moc", "query-memory", "--query", "memory"]),
+            patch("obs_auto_moc.cli.query_memory", return_value=SimpleNamespace(to_dict=lambda: payload)),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            self.assertEqual(cli.main(), 0)
+            self.assertIn("result[1]: TechVault/atomic.md (10)", stdout.getvalue())
+
+    def test_wake_up_dispatches(self) -> None:
+        payload = {
+            "generated_at": "2026-04-17T10:20:00+00:00",
+            "output_path": "/tmp/vault/claw/moc/memory/wake-up/demo.md",
+            "hot_note_paths": ["TechVault/atomic.md"],
+            "stale_note_paths": [],
+            "open_questions": ["How should dream mode write back proposals?"],
+            "contradiction_count": 1,
+        }
+        with (
+            patch("sys.argv", ["obs-auto-moc", "wake-up"]),
+            patch("obs_auto_moc.cli.build_wake_up_bundle", return_value=SimpleNamespace(to_dict=lambda: payload)),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            self.assertEqual(cli.main(), 0)
+            self.assertIn("hot_note_count: 1", stdout.getvalue())
+
+    def test_dream_dispatches(self) -> None:
+        payload = {
+            "generated_at": "2026-04-17T10:30:00+00:00",
+            "proposal_path": "/tmp/vault/claw/moc/memory/dream/demo.md",
+            "missing_contract_note_paths": ["TechVault/atomic.md"],
+            "duplicate_candidates": [],
+            "contradiction_count": 0,
+        }
+        with (
+            patch("sys.argv", ["obs-auto-moc", "dream"]),
+            patch("obs_auto_moc.cli.run_dream_mode", return_value=SimpleNamespace(to_dict=lambda: payload)),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            self.assertEqual(cli.main(), 0)
+            self.assertIn("proposal_path:", stdout.getvalue())
+
+    def test_distill_persona_goals_dispatches(self) -> None:
+        payload = {
+            "generated_at": "2026-04-17T10:40:00+00:00",
+            "overlay_path": "/tmp/vault/claw/moc/memory/persona/persona-goal-model.md",
+            "canonical_path": "/tmp/vault/PersonalVault/Persona Goal Model.md",
+            "heuristics": ["Prefer deterministic pipelines."],
+            "goals": ["建立長期記憶系統。"],
+            "source_note_count": 2,
+            "applied": True,
+        }
+        with (
+            patch("sys.argv", ["obs-auto-moc", "distill-persona-goals", "--apply"]),
+            patch("obs_auto_moc.cli.distill_persona_goals", return_value=SimpleNamespace(to_dict=lambda: payload)),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            self.assertEqual(cli.main(), 0)
+            self.assertIn("applied: true", stdout.getvalue())
+
+    def test_synthesize_memory_dispatches(self) -> None:
+        payload = {
+            "generated_at": "2026-04-17T10:50:00+00:00",
+            "query": "memory",
+            "verified": [{"note_path": "TechVault/atomic.md"}],
+            "synthesized": ["Entity `memory` spans 2 notes."],
+            "open_questions": ["What is missing?"],
+            "artifact_path": "/tmp/vault/claw/moc/memory/synthesis/demo.md",
+        }
+        with (
+            patch("sys.argv", ["obs-auto-moc", "synthesize-memory", "--query", "memory", "--write-artifact"]),
+            patch("obs_auto_moc.cli.synthesize_memory", return_value=SimpleNamespace(to_dict=lambda: payload)),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            self.assertEqual(cli.main(), 0)
+            self.assertIn("synthesized_count: 1", stdout.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 ---
 name: obs-auto-moc
-description: "建立 review-first 的 Obsidian MOC manifest、proposal 與 preview。預設不改 live MOC，只有明確要求時才 apply。"
+description: "建立 review-first 的 Obsidian MOC manifest、proposal、preview 與 memory overlays。預設不改 live canonical notes，只有明確要求時才 apply。"
 ---
 
 # Obs Auto MOC Skill
@@ -55,6 +55,7 @@ description: "建立 review-first 的 Obsidian MOC manifest、proposal 與 previ
 - 產出 manifest、proposal 與 preview
 - 只有在 `--apply` 時才原子更新 live `MOC.md`
 - 支援 metadata-only `Decayed` 狀態；agent search / read / 引用可喚醒筆記並重算 `last_resonated_at`
+- 維護 `claw/moc/memory/*` secondary overlays，例如 `health`、`wake-up`、`dream`、`persona`、`synthesis`
 
 ## 必要流程
 
@@ -80,30 +81,32 @@ description: "建立 review-first 的 Obsidian MOC manifest、proposal 與 previ
 
 ## root-note pipeline scaffold
 
-目前 repo 內已加入第一版 script-side scaffold，對應 `root-note -> PicoClaw -> destination MOC` 流程：
+目前 repo 內已加入第一版 script-side scaffold，對應 `root-note -> Stage 2 agent -> destination MOC` 流程：
 
-- `monitor-root-note`：掃描 `root-note/`，只對變更檔案產出 PicoClaw handoff artifact
+- `monitor-root-note`：掃描 `root-note/`，只對變更檔案產出 Stage 2 handoff artifact；若待送批次過大，會只送出本輪上限內的前段，剩餘項目留待下一輪重試
 - `apply-picoclaw-report --report <file>`：吃結構化 PicoClaw 完成回報，更新 pipeline state，並刷新 touched destination MOC
+- 當 report entry 成功落成 `processed` / `skipped` 後，原始 `root-note/` source note 會被移到 `pipeline/root-note-archive/<status>/<job_id>/...`，讓 intake 區真正排空
 - `queue-picoclaw-report --report <file> [--run-pipeline]`：驗證回報後先放入 report inbox，必要時立刻跑一輪 pipeline
 - `record-agent-reference --note-path <path>...`：記錄 agent reference batch，解除 `Decayed`，重算 `last_resonated_at`，並重建 touched note set 的 `related`
 - `refresh-destination-mocs`：直接重建 `TechVault` / `WorkVault` / `PersonalVault` 的 `MOC.md`
-- `dispatch-picoclaw-handoff --handoff <file>`：把 handoff job 直接交給 live PicoClaw，擷取結構化 report，再餵回 pipeline
+- `dispatch-picoclaw-handoff --handoff <file>`：把 handoff job 直接交給 live OpenClaw Stage 2 runtime，擷取結構化 report，再餵回 pipeline
 - `run-pipeline-once`：先吃 report inbox 裡的 PicoClaw 完成回報，再從 `root-note/` 產出下一個 handoff job；若 auto-dispatch 開啟，會立刻把 handoff 送進 live PicoClaw
+- `import-session-insights --insights <file> [--lesson <file>] [--decision <file>]`：把 distilled session analytics 匯入 `memory/health`、`memory/dream`、`memory/persona`；可選擇匯入 `skill-card` / `skill-link` overlays
 - 若 queued PicoClaw report 是壞的或無法套用，`run-pipeline-once` 會把它隔離到 `pipeline/picoclaw-report-failures/`，並讓受影響的 `root-note` 項目回到可重試狀態
-- 若 live PicoClaw auto-dispatch 自己回了壞 output 或沒回合法 report block，`run-pipeline-once` 也只會把受影響項目標成可重試，不會再整條卡死在 `handed_off_to_picoclaw`
-- 若 live PicoClaw 只回部分 entries，缺的 handoff 項目會自動補成 `failed` 後重試，不會再殘留成假性的 `handed_off_to_picoclaw`
-- 若 live PicoClaw 回了 stale job / 假的 processed output（目的筆記根本沒落地），dispatcher 會直接走本機 fallback，把 source root-note 複製到選定的 destination vault 後再回灌有效 report
+- 若 live OpenClaw Stage 2 auto-dispatch 自己回了壞 output 或沒回合法 report block，`run-pipeline-once` 也只會把受影響項目標成可重試，不會再整條卡死在 stale in-flight handoff state
+- 若 live OpenClaw Stage 2 只回部分 entries，缺的 handoff 項目會自動補成 `failed` 後重試，不會再殘留成假性的 stale in-flight state
+- 若 live OpenClaw Stage 2 回了 stale job / 假的 processed output（目的筆記根本沒落地），dispatcher 會直接走本機 fallback，把 source root-note 複製到選定的 destination vault 後再回灌有效 report
 - `listen --host 127.0.0.1 --port 45460 --run-pipeline`：提供 loopback `GET /health`、`POST /picoclaw-report` 與 `POST /agent-reference` callback ingestion
 - handoff artifact 的 `callback_contract.endpoint` 預設會指向 `http://127.0.0.1:45460/picoclaw-report`
 - handoff artifact 會附上 `vault_path` 與 destination root paths，讓 PicoClaw 在回報前先建立目的筆記
 
 注意：
 
-- Stage 2 agent 由 live PicoClaw 執行，不是在 `obs-auto-moc` 內執行
+- Stage 2 agent 由 live OpenClaw 執行，不是在 `obs-auto-moc` 內執行
 - Stage 2 規則入口已對齊到 pi3 notes 內的 `ObsToolsVault/README.md`，更細的遷移規則在 `ObsToolsVault/specs/`
 - pi3 上的建議部署是 `obs-auto-moc-listener.service` + `obs-auto-moc-pipeline.path` + `obs-auto-moc-pipeline.timer`
-- `bin/obs-auto-moc-runner` 預設會開 `OBS_AUTO_MOC_AUTO_DISPATCH=1`，並使用 `cron:obs-auto-moc:<job_id>` 這種 job-scoped session 自動把 handoff 送進 PicoClaw，避免沿用舊對話上下文
-- `bin/obs-auto-moc-listen` / `bin/obs-auto-moc-runner` 支援 `OBS_AUTO_MOC_SYNC_ROOT`、`OBS_AUTO_MOC_VAULT_PATH`、`OBS_AUTO_MOC_AUTO_DISPATCH`、`OBS_AUTO_MOC_PICOCLAW_SESSION`、`OBS_AUTO_MOC_STALE_HANDOFF_SECONDS` 等環境覆寫；其中 `OBS_AUTO_MOC_PICOCLAW_SESSION` 會被當成 session prefix，dispatcher 會自動附上 `:<job_id>`，也可自行放 `{job_id}` placeholder
+- `bin/obs-auto-moc-runner` 預設會開 `OBS_AUTO_MOC_AUTO_DISPATCH=1`，並使用 `cron:obs-auto-moc:<job_id>` 這種 job-scoped session 自動把 handoff 送進 OpenClaw Stage 2 runtime，避免沿用舊對話上下文
+- `bin/obs-auto-moc-listen` / `bin/obs-auto-moc-runner` 支援 `OBS_AUTO_MOC_SYNC_ROOT`、`OBS_AUTO_MOC_VAULT_PATH`、`OBS_AUTO_MOC_AUTO_DISPATCH`、`OBS_AUTO_MOC_STAGE2_BIN`、`OBS_AUTO_MOC_STAGE2_SESSION`、`OBS_AUTO_MOC_STAGE2_TIMEOUT_S`、`OBS_AUTO_MOC_STAGE2_MAX_ENTRIES`、`OBS_AUTO_MOC_STAGE2_MAX_SOURCE_BYTES`、`OBS_AUTO_MOC_STALE_HANDOFF_SECONDS` 等環境覆寫；其中 `OBS_AUTO_MOC_STAGE2_SESSION` 會被當成 session prefix，dispatcher 會自動附上 `:<job_id>`，也可自行放 `{job_id}` placeholder
 
 ## 常用指令
 
@@ -125,10 +128,20 @@ description: "建立 review-first 的 Obsidian MOC manifest、proposal 與 previ
 /home/haman/.picoclaw/workspace/bin/obs-auto-moc build --apply
 ```
 
+### Import session insights
+
+```bash
+/home/haman/.picoclaw/workspace/bin/obs-auto-moc import-session-insights \
+  --insights /path/to/insights.json \
+  --lesson /path/to/lesson.json \
+  --decision /path/to/decision.json
+```
+
 ## Guardrails
 
 - 預設是 review-first，不是 auto-apply。
 - 若 `last-run.json` 顯示 parse errors、missing schema fields 或 unresolved links，要誠實說明。
 - 若 sync config 缺失或有多份 config，直接回報錯誤，不要猜路徑。
-- 除了 `notes/MOC.md` 的 explicit apply 之外，不要改寫 vault 內其他筆記。
+- canonical note scope 仍只限 `root-note`、`TechVault`、`WorkVault`、`PersonalVault`；`memory/*` 是 secondary overlays，不是新 top-level vault scope。
+- 除了 `notes/MOC.md` 或 `PersonalVault/Persona Goal Model.md` 這種 explicit apply path 之外，不要改寫 vault 內其他筆記。
 - `notes/claw/moc` 是 artifact root；preview/proposal 都先寫這裡。

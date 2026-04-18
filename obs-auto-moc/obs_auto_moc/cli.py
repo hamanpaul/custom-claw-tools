@@ -10,13 +10,20 @@ from .engine import (
     dispatch_handoff_to_picoclaw,
     load_last_run,
     monitor_root_note,
+    now_iso,
     queue_picoclaw_report,
     record_agent_references,
     refresh_destination_mocs,
     resolve_paths,
     run_pipeline_once,
 )
+from .dream import run_dream_mode
+from .persona_goal import distill_persona_goals
+from .retrieval import query_memory
+from .session_insights import import_session_insights
 from .server import serve_loopback
+from .synthesis import synthesize_memory
+from .wakeup import build_wake_up_bundle
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -135,6 +142,77 @@ def build_parser() -> argparse.ArgumentParser:
     listen.add_argument("--port", type=int, default=45460)
     listen.add_argument("--run-pipeline", action="store_true", help="apply queued report immediately after callback ingestion")
 
+    query = subparsers.add_parser(
+        "query-memory",
+        help="query note memory using note content plus the secondary ledger",
+    )
+    query.add_argument("--sync-root", type=Path, default=Path("~/.config/obsidian-headless/sync"))
+    query.add_argument("--vault-path", type=Path)
+    query.add_argument("--artifacts-root", type=Path)
+    query.add_argument("--query", required=True)
+    query.add_argument("--limit", type=int, default=10)
+    query.add_argument("--generated-at")
+    query.add_argument("--json", action="store_true", help="print machine-readable summary")
+
+    import_insights = subparsers.add_parser(
+        "import-session-insights",
+        help="import distilled session analytics artifacts into memory overlays",
+    )
+    import_insights.add_argument("--sync-root", type=Path, default=Path("~/.config/obsidian-headless/sync"))
+    import_insights.add_argument("--vault-path", type=Path)
+    import_insights.add_argument("--artifacts-root", type=Path)
+    import_insights.add_argument("--insights", type=Path)
+    import_insights.add_argument("--lesson", type=Path)
+    import_insights.add_argument("--decision", type=Path)
+    import_insights.add_argument("--skill-cards", type=Path)
+    import_insights.add_argument("--skill-links", type=Path)
+    import_insights.add_argument("--generated-at")
+    import_insights.add_argument("--json", action="store_true", help="print machine-readable summary")
+
+    wakeup = subparsers.add_parser(
+        "wake-up",
+        help="build a wake-up bundle from current memory health, hot notes, and open questions",
+    )
+    wakeup.add_argument("--sync-root", type=Path, default=Path("~/.config/obsidian-headless/sync"))
+    wakeup.add_argument("--vault-path", type=Path)
+    wakeup.add_argument("--artifacts-root", type=Path)
+    wakeup.add_argument("--generated-at")
+    wakeup.add_argument("--json", action="store_true", help="print machine-readable summary")
+
+    dream = subparsers.add_parser(
+        "dream",
+        help="generate proposal-first dream-mode consolidation suggestions",
+    )
+    dream.add_argument("--sync-root", type=Path, default=Path("~/.config/obsidian-headless/sync"))
+    dream.add_argument("--vault-path", type=Path)
+    dream.add_argument("--artifacts-root", type=Path)
+    dream.add_argument("--generated-at")
+    dream.add_argument("--json", action="store_true", help="print machine-readable summary")
+
+    persona = subparsers.add_parser(
+        "distill-persona-goals",
+        help="distill heuristics and goals from PersonalVault into an overlay, with optional canonical apply",
+    )
+    persona.add_argument("--sync-root", type=Path, default=Path("~/.config/obsidian-headless/sync"))
+    persona.add_argument("--vault-path", type=Path)
+    persona.add_argument("--artifacts-root", type=Path)
+    persona.add_argument("--generated-at")
+    persona.add_argument("--apply", action="store_true")
+    persona.add_argument("--json", action="store_true", help="print machine-readable summary")
+
+    synthesis = subparsers.add_parser(
+        "synthesize-memory",
+        help="assemble VERIFIED / SYNTHESIZED / OPEN QUESTION output from matched notes",
+    )
+    synthesis.add_argument("--sync-root", type=Path, default=Path("~/.config/obsidian-headless/sync"))
+    synthesis.add_argument("--vault-path", type=Path)
+    synthesis.add_argument("--artifacts-root", type=Path)
+    synthesis.add_argument("--query", required=True)
+    synthesis.add_argument("--limit", type=int, default=8)
+    synthesis.add_argument("--generated-at")
+    synthesis.add_argument("--write-artifact", action="store_true")
+    synthesis.add_argument("--json", action="store_true", help="print machine-readable summary")
+
     return parser
 
 
@@ -162,6 +240,7 @@ def print_monitor_summary(result: dict[str, object]) -> None:
     print(f"scanned_files: {result['scanned_files']}")
     print(f"handed_off_files: {result['handed_off_files']}")
     print(f"unchanged_files: {result['unchanged_files']}")
+    print(f"deferred_files: {result.get('deferred_files', 0)}")
     print(f"job_id: {result['job_id']}")
     print(f"handoff_path: {result['handoff_path']}")
     print(f"ruleset_name: {result['ruleset_name']}")
@@ -228,6 +307,7 @@ def print_pipeline_run_summary(result: dict[str, object]) -> None:
     print(f"handoff_path: {result['handoff_path']}")
     print(f"handed_off_files: {result['handed_off_files']}")
     print(f"unchanged_files: {result['unchanged_files']}")
+    print(f"deferred_files: {result.get('deferred_files', 0)}")
     print(f"dispatch_enabled: {str(result.get('dispatch_enabled', False)).lower()}")
     print(f"dispatch_attempted: {result.get('dispatch_attempted', 0)}")
     print(f"dispatch_succeeded: {result.get('dispatch_succeeded', 0)}")
@@ -251,6 +331,67 @@ def print_dispatch_summary(result: dict[str, object]) -> None:
     if result.get("pipeline_result"):
         print(f"pipeline_reports_applied: {result['pipeline_result']['reports_applied']}")
         print(f"pipeline_handoff_job_id: {result['pipeline_result']['handoff_job_id']}")
+
+
+def print_memory_query_summary(result: dict[str, object]) -> None:
+    print(f"generated_at: {result['generated_at']}")
+    print(f"query: {result['query']}")
+    print(f"result_count: {result['result_count']}")
+    for index, row in enumerate(result.get("results") or [], start=1):
+        print(f"result[{index}]: {row['note_path']} ({row['score']})")
+
+
+def print_wakeup_summary(result: dict[str, object]) -> None:
+    print(f"generated_at: {result['generated_at']}")
+    print(f"output_path: {result['output_path']}")
+    print(f"hot_note_count: {len(result.get('hot_note_paths') or [])}")
+    print(f"stale_note_count: {len(result.get('stale_note_paths') or [])}")
+    print(f"open_question_count: {len(result.get('open_questions') or [])}")
+    print(f"contradiction_count: {result.get('contradiction_count', 0)}")
+    print(f"operational_signal_count: {len(result.get('operational_signals') or [])}")
+    print(f"session_friction_count: {len(result.get('session_friction_signals') or {})}")
+
+
+def print_dream_summary(result: dict[str, object]) -> None:
+    print(f"generated_at: {result['generated_at']}")
+    print(f"proposal_path: {result['proposal_path']}")
+    print(f"missing_contract_note_count: {len(result.get('missing_contract_note_paths') or [])}")
+    print(f"duplicate_candidate_count: {len(result.get('duplicate_candidates') or [])}")
+    print(f"contradiction_count: {result.get('contradiction_count', 0)}")
+    print(f"session_patch_proposal_count: {len(result.get('session_patch_proposals') or [])}")
+    print(f"accepted_rule_candidate_count: {len(result.get('accepted_rule_candidates') or [])}")
+
+
+def print_persona_goal_summary(result: dict[str, object]) -> None:
+    print(f"generated_at: {result['generated_at']}")
+    print(f"overlay_path: {result['overlay_path']}")
+    print(f"canonical_path: {result.get('canonical_path')}")
+    print(f"heuristic_count: {len(result.get('heuristics') or [])}")
+    print(f"goal_count: {len(result.get('goals') or [])}")
+    print(f"source_note_count: {result.get('source_note_count', 0)}")
+    print(f"session_heuristic_count: {len(result.get('session_heuristics') or [])}")
+    print(f"applied: {str(result.get('applied', False)).lower()}")
+
+
+def print_synthesis_summary(result: dict[str, object]) -> None:
+    print(f"generated_at: {result['generated_at']}")
+    print(f"query: {result['query']}")
+    print(f"verified_count: {len(result.get('verified') or [])}")
+    print(f"synthesized_count: {len(result.get('synthesized') or [])}")
+    print(f"open_question_count: {len(result.get('open_questions') or [])}")
+    print(f"artifact_path: {result.get('artifact_path')}")
+
+
+def print_import_session_insights_summary(result: dict[str, object]) -> None:
+    print(f"generated_at: {result['generated_at']}")
+    print(f"dream_overlay_path: {result['dream_overlay_path']}")
+    print(f"persona_overlay_path: {result['persona_overlay_path']}")
+    print(f"method_graph_path: {result.get('method_graph_path')}")
+    print(f"top_event_type_count: {len(result.get('top_event_types') or [])}")
+    print(f"heuristic_candidate_count: {len(result.get('heuristic_candidates') or [])}")
+    print(f"accepted_rule_candidate_count: {len(result.get('accepted_rule_candidates') or [])}")
+    print(f"skill_card_count: {result.get('skill_card_count', 0)}")
+    print(f"skill_link_count: {result.get('skill_link_count', 0)}")
 
 
 def emit_payload(
@@ -390,6 +531,77 @@ def main() -> int:
             port=args.port,
             run_pipeline=args.run_pipeline,
         )
+        return 0
+
+    if args.command == "query-memory":
+        result = query_memory(
+            query=args.query,
+            sync_root=args.sync_root.expanduser() if args.vault_path is None else None,
+            vault_path=args.vault_path.expanduser() if args.vault_path else None,
+            artifacts_root=args.artifacts_root.expanduser() if args.artifacts_root else None,
+            generated_at=args.generated_at or now_iso(),
+            limit=args.limit,
+        )
+        emit_payload(result.to_dict(), as_json=args.json, printer=print_memory_query_summary)
+        return 0
+
+    if args.command == "import-session-insights":
+        result = import_session_insights(
+            sync_root=args.sync_root.expanduser() if args.vault_path is None else None,
+            vault_path=args.vault_path.expanduser() if args.vault_path else None,
+            artifacts_root=args.artifacts_root.expanduser() if args.artifacts_root else None,
+            insights_path=args.insights.expanduser() if args.insights else None,
+            lesson_path=args.lesson.expanduser() if args.lesson else None,
+            decision_path=args.decision.expanduser() if args.decision else None,
+            skill_cards_path=args.skill_cards.expanduser() if args.skill_cards else None,
+            skill_links_path=args.skill_links.expanduser() if args.skill_links else None,
+            generated_at=args.generated_at or now_iso(),
+        )
+        emit_payload(result.to_dict(), as_json=args.json, printer=print_import_session_insights_summary)
+        return 0
+
+    if args.command == "wake-up":
+        result = build_wake_up_bundle(
+            sync_root=args.sync_root.expanduser() if args.vault_path is None else None,
+            vault_path=args.vault_path.expanduser() if args.vault_path else None,
+            artifacts_root=args.artifacts_root.expanduser() if args.artifacts_root else None,
+            generated_at=args.generated_at or now_iso(),
+        )
+        emit_payload(result.to_dict(), as_json=args.json, printer=print_wakeup_summary)
+        return 0
+
+    if args.command == "dream":
+        result = run_dream_mode(
+            sync_root=args.sync_root.expanduser() if args.vault_path is None else None,
+            vault_path=args.vault_path.expanduser() if args.vault_path else None,
+            artifacts_root=args.artifacts_root.expanduser() if args.artifacts_root else None,
+            generated_at=args.generated_at or now_iso(),
+        )
+        emit_payload(result.to_dict(), as_json=args.json, printer=print_dream_summary)
+        return 0
+
+    if args.command == "distill-persona-goals":
+        result = distill_persona_goals(
+            sync_root=args.sync_root.expanduser() if args.vault_path is None else None,
+            vault_path=args.vault_path.expanduser() if args.vault_path else None,
+            artifacts_root=args.artifacts_root.expanduser() if args.artifacts_root else None,
+            generated_at=args.generated_at or now_iso(),
+            apply=args.apply,
+        )
+        emit_payload(result.to_dict(), as_json=args.json, printer=print_persona_goal_summary)
+        return 0
+
+    if args.command == "synthesize-memory":
+        result = synthesize_memory(
+            query=args.query,
+            sync_root=args.sync_root.expanduser() if args.vault_path is None else None,
+            vault_path=args.vault_path.expanduser() if args.vault_path else None,
+            artifacts_root=args.artifacts_root.expanduser() if args.artifacts_root else None,
+            generated_at=args.generated_at or now_iso(),
+            limit=args.limit,
+            write_artifact=args.write_artifact,
+        )
+        emit_payload(result.to_dict(), as_json=args.json, printer=print_synthesis_summary)
         return 0
 
     parser.error(f"unsupported command: {args.command}")
