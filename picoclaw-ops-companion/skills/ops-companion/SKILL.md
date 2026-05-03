@@ -214,7 +214,7 @@ If helper commands are insufficient, then use:
 ## Guardrails
 
 - Do not bypass the helper commands when they already fit the request.
-- Do not use `ops-companion` or `ops-github-research` for scheduled, daily, or morning research or other background research automation on the live NAS path.
+- Do not use `ops-companion`, `mcp_opscompanion_github_research`, or `ops-github-research` for scheduled, daily, or morning research or other background research automation on the live NAS path.
 - Do not claim unsupported wrappers already execute.
 - `github_research` is read-only research for explicit operator or recovery work, not a general shell pass-through.
 - Do not bypass the companion schema, approval, or audit flow.

@@ -12,7 +12,7 @@
 目前 live PicoClaw 受到 workspace/policy 邊界限制，不適合直接做以下任務：
 
 - `npm` 安裝或管理使用者態套件
-- `git` / `gh` research 與 repository 維運
+- 保留給明確 operator / recovery investigation 的 repository 維運
 - 需要跳出 PicoClaw workspace 的檔案與 repo 操作
 - 需要較強審計與 approval 的高風險任務
 
@@ -46,7 +46,7 @@
 - 套用風險分級與 allowlist policy
 - 管理 approval job 與 2FA
 - 建立 GitHub Copilot SDK session
-- 執行 `git` / `gh` / `npm` / research 任務
+- 執行 `git` / `gh` / `npm` 與僅限明確 operator / recovery 的任務
 - 寫出 result / log / audit artifact
 
 ## 安全原則
