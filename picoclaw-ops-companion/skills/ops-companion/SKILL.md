@@ -1,11 +1,11 @@
 ---
 name: ops-companion
-description: "Route repo, research, approval, and Telegram allowlist tasks through fixed ops helper commands on this PicoClaw host. Prefer `ops-notes-analysis`, `ops-workspace-analysis`, `ops-github-research`, `ops-repo-relay-push`, `ops-npm-install-package`, `ops-approve`, `ops-reject`, `ops-request-status`, and `ops-telegram-allowlist` over raw shell."
+description: "Use when explicit operator, recovery, approval, status, or Telegram allowlist tasks must go through fixed ops helper commands on this PicoClaw host. Do not use this skill for scheduled/daily/morning research or routine GitHub research on the live NAS path."
 ---
 
 # Ops Companion Skill
 
-Use this skill when the request needs repo, system, research, or approval handling that should not be executed directly inside PicoClaw's default workspace policy.
+Use this skill only for explicit operator, recovery, approval, status, or allowlist handling that should not be executed directly inside PicoClaw's default workspace policy. Do **not** use it for scheduled, daily, or morning research automation.
 
 ## Fixed paths
 
@@ -21,25 +21,33 @@ Use this skill when the request needs repo, system, research, or approval handli
 
 Use `ops-companion` when the task:
 
-- asks to analyze notes/workspace/repo content through the companion bridge
-- asks for GitHub research through the companion bridge
+- is an explicit operator or recovery action that must go through the companion bridge
 - asks to approve or reject an existing ops job
 - asks for request/job status from `ops-companion`
 - asks to inspect or update PicoClaw Telegram `allow_from`
-- needs audit artifacts or risk classification
+- needs audit artifacts or risk classification for an explicit operator flow
 - needs high-risk approval with Telegram sender plus TOTP
-- crosses PicoClaw's normal workspace or policy boundary
-- should be routed to the companion execution layer instead of direct ad hoc shell work
+- crosses PicoClaw's normal workspace or policy boundary for an explicit operator-approved action
+- should be routed to the companion execution layer instead of direct ad hoc shell work for a manual operator or recovery task
+
+Do **not** use `ops-companion` when the task is:
+
+- scheduled, daily, or morning research
+- recurring or background research automation
+- routine GitHub research on the live NAS path
+- ordinary repo, notes, or workspace research that does not require explicit operator or recovery handling
 
 ## Critical routing rule
 
 For requests covered by this skill, **prefer the fixed helper commands in `~/.picoclaw/workspace/bin` and do not replace them with generic `ls`, `find`, `gh`, or ad hoc shell pipelines**.
 
+For scheduled, daily, or morning research and routine GitHub research on the live NAS path, **do not route through `ops-companion`, `mcp_opscompanion_github_research`, or `ops-github-research`**.
+
 If the user asks for:
 
-- notes analysis -> use `ops-notes-analysis`
-- workspace/repo path analysis -> use `ops-workspace-analysis`
-- GitHub research -> use `ops-github-research`
+- notes analysis -> use `ops-notes-analysis` for explicit operator or recovery analysis only
+- workspace/repo path analysis -> use `ops-workspace-analysis` for explicit operator or recovery analysis only
+- GitHub research -> do **not** use this skill for routine or scheduled research; only use `ops-github-research` for an explicit operator or recovery investigation that must go through the companion bridge
 - create repo push approval job -> use `ops-repo-relay-push`
 - create npm install request -> use `ops-npm-install-package`
 - `/approve <job-id> <totp>` -> use `ops-approve`
@@ -74,7 +82,7 @@ Only fall back to raw shell if the helper command cannot express the request.
 ### Live execute path today
 
 - `workspace_analysis`
-- `github_research` (read-only GitHub research via a restricted Copilot SDK session)
+- `github_research` (available for explicit operator or recovery GitHub investigation via a restricted Copilot SDK session; not for scheduled, daily, or morning research, and not for routine live-NAS GitHub research)
 
 ### Live companion entrypoints today
 
@@ -126,9 +134,9 @@ Only fall back to raw shell if the helper command cannot express the request.
 
 When the current PicoClaw surface exposes MCP tools, use them directly:
 
-- notes analysis -> `mcp_opscompanion_notes_analysis`
-- workspace/repo path analysis -> `mcp_opscompanion_workspace_analysis`
-- GitHub research -> `mcp_opscompanion_github_research`
+- notes analysis -> `mcp_opscompanion_notes_analysis` for explicit operator or recovery analysis only
+- workspace/repo path analysis -> `mcp_opscompanion_workspace_analysis` for explicit operator or recovery analysis only
+- GitHub research -> `mcp_opscompanion_github_research` only for explicit operator or recovery investigations, never for routine scheduled, daily, or morning research
 - create repo push approval job -> `mcp_opscompanion_repo_relay_push`
 - create npm install request -> `mcp_opscompanion_npm_install_package`
 - approve job -> `mcp_opscompanion_approve_job`
@@ -147,6 +155,8 @@ ops-notes-analysis SENDER "PROMPT..."
 ```bash
 ops-workspace-analysis [--scope notes|workspace|repo] [--write-artifacts] SENDER PATH "PROMPT..."
 ```
+
+Use `ops-github-research` only for explicit operator or recovery investigations. Do **not** use it for scheduled, daily, or morning research or routine GitHub research on the live NAS path.
 
 ```bash
 ops-github-research [--mode MODE] [--limit N] SENDER OWNER REPO "QUERY..."
@@ -187,9 +197,9 @@ ops-telegram-allowlist remove --entry telegram:123456789 --restart-gateway
 
 Natural-language mapping examples:
 
-- “分析 notes 頂層結構” -> `ops-notes-analysis telegram:<PRIMARY_USER_ID> "分析 notes 頂層結構"`
-- “分析 `/home/haman/.picoclaw/workspace/notes/root-note`” -> `ops-workspace-analysis telegram:<PRIMARY_USER_ID> /home/haman/.picoclaw/workspace/notes/root-note "..."`  
-- “研究 `hamanpaul/custom-claw-tools` 最近的 obs-auto-moc 變更” -> `ops-github-research telegram:<PRIMARY_USER_ID> hamanpaul custom-claw-tools "..."`
+- “operator diagnostics：分析 notes 頂層結構” -> `ops-notes-analysis telegram:<PRIMARY_USER_ID> "分析 notes 頂層結構"`
+- “operator diagnostics：分析 `/home/haman/.picoclaw/workspace/notes/root-note`” -> `ops-workspace-analysis telegram:<PRIMARY_USER_ID> /home/haman/.picoclaw/workspace/notes/root-note "..."`
+- “operator recovery：研究 `hamanpaul/custom-claw-tools` 最近的 obs-auto-moc 變更” -> `ops-github-research telegram:<PRIMARY_USER_ID> hamanpaul custom-claw-tools "..."`
 - “/approve job-xxx 123456” -> `ops-approve telegram:<PRIMARY_USER_ID> job-xxx 123456`
 - “/reject job-xxx” -> `ops-reject telegram:<PRIMARY_USER_ID> job-xxx`
 
@@ -204,8 +214,9 @@ If helper commands are insufficient, then use:
 ## Guardrails
 
 - Do not bypass the helper commands when they already fit the request.
+- Do not use `ops-companion` or `ops-github-research` for scheduled, daily, or morning research or other background research automation on the live NAS path.
 - Do not claim unsupported wrappers already execute.
-- `github_research` is read-only research, not a general shell pass-through.
+- `github_research` is read-only research for explicit operator or recovery work, not a general shell pass-through.
 - Do not bypass the companion schema, approval, or audit flow.
 - Do not ask for long-lived secrets; approval only needs the current 6-digit TOTP.
 - If the companion returns `failed`, `rejected`, or `expired`, report that state honestly.

@@ -196,7 +196,7 @@ chmod +x bin/picoclaw-ops-relay
 - `intake-file --request-file <path> [--auto-execute]`
 - `intake-json --request-json <json> [--auto-execute]`
 - `workspace-analysis --sender <telegram:id> --path <path> --prompt <text> [--scope <notes|workspace|repo>] [--write-artifacts] [--request-id <request-id>] [--no-execute]`
-- `github-research --sender <telegram:id> --query <text> [--scope <repo|org|user|global>] [--repo <owner/name>] [--owner <owner>] [--mode <generic|issues|pull_requests|code|repositories>] [--limit <n>] [--request-id <request-id>] [--no-execute]`
+- `github-research --sender <telegram:id> --query <text> [--scope <repo|org|user|global>] [--repo <owner/name>] [--owner <owner>] [--mode <generic|issues|pull_requests|code|repositories>] [--limit <n>] [--request-id <request-id>] [--no-execute]`（僅限明確 operator/recovery investigation；不要用於 scheduled/daily/morning research）
 - `repo-relay-push --sender <telegram:id> --repo-path <path> [--remote <name>] [--branch <name>] [--revision <rev>] [--transport <relay|bundle>] [--request-id <request-id>] [--no-execute]`
 - `npm-install-package --sender <telegram:id> --project-path <path> --package <name> [--package <name> ...] [--scope <project|user>] [--dev] [--global] [--request-id <request-id>] [--no-execute]`
 
@@ -209,7 +209,7 @@ bin/picoclaw-ops-relay workspace-analysis \
   --prompt "Summarize the top-level notes layout for troubleshooting."
 ```
 
-範例：直接走 GitHub research（low risk，會自動 `intake -> execute`）：
+範例：明確 operator/recovery GitHub investigation（low risk，會自動 `intake -> execute`；不要用於 scheduled/daily/morning research）：
 
 ```bash
 bin/picoclaw-ops-relay github-research \
@@ -449,14 +449,14 @@ npm run dev -- decision --sender telegram:<PRIMARY_USER_ID> --text "/reject <job
 - 高風險 execution layer 已實作：
   - `repo_relay_push` 可執行 `relay` push 或產生 `bundle` artifact
   - `npm_install_package` 可執行專案 scope install，user/global install 仍需 approval
-### 低風險 execution（目前支援 `workspace_analysis` 與 `github_research`）
+### 低風險 execution（目前支援 `workspace_analysis` 與 `github_research`；其中 `github_research` 僅限明確 operator/recovery investigation）
 
 ```bash
 npm run dev -- execute --request-id <request-id>
 ```
 
 - `workspace_analysis` 仍走本地 deterministic wrapper
-- `github_research` 會建立受限的 GitHub Copilot SDK session，並只放行 companion 自訂的 read-only GitHub search tool
+- `github_research` 會建立受限的 GitHub Copilot SDK session，並只放行 companion 自訂的 read-only GitHub search tool；不要用於 scheduled/daily/morning research 或 routine live-NAS research
 - 已支援的 request type 會寫出 result / artifact / audit；不支援的 request type 仍會明確回報失敗，不會假裝成功
 
 ## 部署與前置需求
