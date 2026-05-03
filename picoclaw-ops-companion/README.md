@@ -200,13 +200,13 @@ chmod +x bin/picoclaw-ops-relay
 - `repo-relay-push --sender <telegram:id> --repo-path <path> [--remote <name>] [--branch <name>] [--revision <rev>] [--transport <relay|bundle>] [--request-id <request-id>] [--no-execute]`
 - `npm-install-package --sender <telegram:id> --project-path <path> --package <name> [--package <name> ...] [--scope <project|user>] [--dev] [--global] [--request-id <request-id>] [--no-execute]`
 
-範例：直接讓 companion 分析目前 notes tree（low risk，會自動 `intake -> execute`）：
+範例：明確 operator/recovery workspace 分析（low risk，會自動 `intake -> execute`；不要用於 routine notes/workspace analysis）：
 
 ```bash
 bin/picoclaw-ops-relay workspace-analysis \
   --sender telegram:<PRIMARY_USER_ID> \
   --path /home/haman/.picoclaw/workspace/notes \
-  --prompt "Summarize the top-level notes layout for troubleshooting."
+  --prompt "Inspect the notes tree for operator handoff/recovery gaps after an interrupted run."
 ```
 
 範例：明確 operator/recovery GitHub investigation（low risk，會自動 `intake -> execute`；不要用於 scheduled/daily/morning research）：
@@ -285,7 +285,7 @@ live 驗證狀態：
 
 - pi3 gateway 已完成 `initialize -> tools/list`
 - 顯式 MCP smoke 已驗證 `health`
-- 自然語言 heartbeat smoke 已驗證會選到 `workspace_analysis`
+- 自然語言 heartbeat smoke 已驗證 `workspace_analysis` 只保留 explicit operator/recovery 分析，不再承接 routine notes/workspace 或一般 live-NAS research
 - high-risk request 現在也可直接透過 MCP 建立 approval job
 - pi3 直接 MCP smoke 已驗證 `repo_relay_push -> approve_job -> ready_for_execution`
 
