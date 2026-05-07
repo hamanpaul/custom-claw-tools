@@ -12,7 +12,7 @@
 目前 live PicoClaw 受到 workspace/policy 邊界限制，不適合直接做以下任務：
 
 - `npm` 安裝或管理使用者態套件
-- `git` / `gh` research 與 repository 維運
+- 保留給明確 operator / recovery investigation 的 repository 維運
 - 需要跳出 PicoClaw workspace 的檔案與 repo 操作
 - 需要較強審計與 approval 的高風險任務
 
@@ -46,7 +46,7 @@
 - 套用風險分級與 allowlist policy
 - 管理 approval job 與 2FA
 - 建立 GitHub Copilot SDK session
-- 執行 `git` / `gh` / `npm` / research 任務
+- 執行 `git` / `gh` / `npm` 與僅限明確 operator / recovery 的任務
 - 寫出 result / log / audit artifact
 
 ## 安全原則
@@ -196,20 +196,20 @@ chmod +x bin/picoclaw-ops-relay
 - `intake-file --request-file <path> [--auto-execute]`
 - `intake-json --request-json <json> [--auto-execute]`
 - `workspace-analysis --sender <telegram:id> --path <path> --prompt <text> [--scope <notes|workspace|repo>] [--write-artifacts] [--request-id <request-id>] [--no-execute]`
-- `github-research --sender <telegram:id> --query <text> [--scope <repo|org|user|global>] [--repo <owner/name>] [--owner <owner>] [--mode <generic|issues|pull_requests|code|repositories>] [--limit <n>] [--request-id <request-id>] [--no-execute]`
+- `github-research --sender <telegram:id> --query <text> [--scope <repo|org|user|global>] [--repo <owner/name>] [--owner <owner>] [--mode <generic|issues|pull_requests|code|repositories>] [--limit <n>] [--request-id <request-id>] [--no-execute]`（僅限明確 operator/recovery investigation；不要用於 scheduled/daily/morning research）
 - `repo-relay-push --sender <telegram:id> --repo-path <path> [--remote <name>] [--branch <name>] [--revision <rev>] [--transport <relay|bundle>] [--request-id <request-id>] [--no-execute]`
 - `npm-install-package --sender <telegram:id> --project-path <path> --package <name> [--package <name> ...] [--scope <project|user>] [--dev] [--global] [--request-id <request-id>] [--no-execute]`
 
-範例：直接讓 companion 分析目前 notes tree（low risk，會自動 `intake -> execute`）：
+範例：明確 operator/recovery workspace 分析（low risk，會自動 `intake -> execute`；不要用於 routine notes/workspace analysis）：
 
 ```bash
 bin/picoclaw-ops-relay workspace-analysis \
   --sender telegram:<PRIMARY_USER_ID> \
   --path /home/haman/.picoclaw/workspace/notes \
-  --prompt "Summarize the top-level notes layout for troubleshooting."
+  --prompt "Inspect the notes tree for operator handoff/recovery gaps after an interrupted run."
 ```
 
-範例：直接走 GitHub research（low risk，會自動 `intake -> execute`）：
+範例：明確 operator/recovery GitHub investigation（low risk，會自動 `intake -> execute`；不要用於 scheduled/daily/morning research）：
 
 ```bash
 bin/picoclaw-ops-relay github-research \
@@ -285,7 +285,7 @@ live 驗證狀態：
 
 - pi3 gateway 已完成 `initialize -> tools/list`
 - 顯式 MCP smoke 已驗證 `health`
-- 自然語言 heartbeat smoke 已驗證會選到 `workspace_analysis`
+- 自然語言 heartbeat smoke 已驗證 `workspace_analysis` 只保留 explicit operator/recovery 分析，不再承接 routine notes/workspace 或一般 live-NAS research
 - high-risk request 現在也可直接透過 MCP 建立 approval job
 - pi3 直接 MCP smoke 已驗證 `repo_relay_push -> approve_job -> ready_for_execution`
 
@@ -449,14 +449,14 @@ npm run dev -- decision --sender telegram:<PRIMARY_USER_ID> --text "/reject <job
 - 高風險 execution layer 已實作：
   - `repo_relay_push` 可執行 `relay` push 或產生 `bundle` artifact
   - `npm_install_package` 可執行專案 scope install，user/global install 仍需 approval
-### 低風險 execution（目前支援 `workspace_analysis` 與 `github_research`）
+### 低風險 execution（目前支援 `workspace_analysis` 與 `github_research`；其中 `github_research` 僅限明確 operator/recovery investigation）
 
 ```bash
 npm run dev -- execute --request-id <request-id>
 ```
 
 - `workspace_analysis` 仍走本地 deterministic wrapper
-- `github_research` 會建立受限的 GitHub Copilot SDK session，並只放行 companion 自訂的 read-only GitHub search tool
+- `github_research` 會建立受限的 GitHub Copilot SDK session，並只放行 companion 自訂的 read-only GitHub search tool；不要用於 scheduled/daily/morning research 或 routine live-NAS research
 - 已支援的 request type 會寫出 result / artifact / audit；不支援的 request type 仍會明確回報失敗，不會假裝成功
 
 ## 部署與前置需求
